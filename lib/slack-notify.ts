@@ -7,6 +7,12 @@ type AssignmentChange = {
   role: "assignee" | "reportingTo";
 };
 
+type TaskAssignmentChange = {
+  userId: string;
+  kind: "assigned" | "unassigned";
+  role: "assignee" | "reportingPerson";
+};
+
 type ProjectMeta = {
   id: string;
   projectId: string;
@@ -73,6 +79,62 @@ export async function notifyProjectAssignmentSlack(
       change,
       ctx.project,
       ctx.projectUrl
+    );
+    sends.push(sendSlackDM(slackUserId, text).catch(() => {}));
+  }
+  await Promise.allSettled(sends);
+}
+
+function buildTaskAssignText(
+  actorName: string,
+  change: TaskAssignmentChange,
+  project: ProjectMeta,
+  task: TaskMeta,
+  taskUrl: string
+): string {
+  const role =
+    change.role === "assignee" ? "assignee" : "reporting person";
+  if (change.kind === "assigned") {
+    return `:bust_in_silhouette: *${actorName}* added you to task <${taskUrl}|${task.title}> (${task.taskId}) in ${project.name} as *${role}*.`;
+  }
+  return `:no_entry_sign: *${actorName}* removed you from task <${taskUrl}|${task.title}> (${task.taskId}) in ${project.name} (${role}).`;
+}
+
+export async function notifyTaskAssignmentSlack(
+  changes: TaskAssignmentChange[],
+  ctx: {
+    actorName: string;
+    project: ProjectMeta;
+    task: TaskMeta;
+    taskUrl: string;
+  }
+): Promise<void> {
+  if (!isSlackConfigured()) return;
+  const filtered = changes.filter((c) => c.userId);
+  if (filtered.length === 0) return;
+
+  const ids = Array.from(new Set(filtered.map((c) => c.userId)));
+  const users = await User.find({ _id: { $in: ids } })
+    .select("settings.slack")
+    .lean();
+  const byId = new Map<string, (typeof users)[number]>(
+    users.map((u) => [String(u._id), u])
+  );
+
+  const sends: Promise<unknown>[] = [];
+  for (const change of filtered) {
+    const u = byId.get(change.userId);
+    const slack = u?.settings?.slack;
+    if (!slack?.connected) continue;
+    if (!slack?.notifyOnAssign) continue;
+    const slackUserId = slack.slackUserId;
+    if (!slackUserId) continue;
+    const text = buildTaskAssignText(
+      ctx.actorName,
+      change,
+      ctx.project,
+      ctx.task,
+      ctx.taskUrl
     );
     sends.push(sendSlackDM(slackUserId, text).catch(() => {}));
   }

@@ -7,7 +7,47 @@ import { connectDB } from "@/lib/mongodb";
 import Project from "@/models/Project";
 import Task, { TASK_STATUSES } from "@/models/Task";
 import User from "@/models/User";
+import TimeLog from "@/models/TimeLog";
 import { getSession } from "@/lib/auth";
+
+function startOfWeek() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1; // week starts Monday
+  d.setDate(d.getDate() - diff);
+  return d;
+}
+
+function startOfDayMinusN(n: number) {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d;
+}
+
+function buildHoursByDay(
+  rows: { _id: string; total: number }[],
+  days: number
+) {
+  const map = new Map(rows.map((r) => [r._id, r.total] as const));
+  const out: { day: string; label: string; hours: number }[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    out.push({
+      day: iso,
+      label: d.toLocaleDateString(undefined, {
+        weekday: "short",
+        timeZone: "UTC",
+      }),
+      hours: map.get(iso) ?? 0,
+    });
+  }
+  return out;
+}
 
 export async function GET(_req: NextRequest) {
   const session = await getSession();
@@ -19,6 +59,9 @@ export async function GET(_req: NextRequest) {
 
     const role = session.role;
     const userObjectId = new mongoose.Types.ObjectId(session.sub);
+
+    const weekStart = startOfWeek();
+    const trendStart = startOfDayMinusN(6); // 7 days incl. today
 
     if (role === "user") {
       const projectVisibility = {
@@ -34,6 +77,10 @@ export async function GET(_req: NextRequest) {
         statusAgg,
         recentProjects,
         recentTasks,
+        myLogsWeekAgg,
+        myLogsTotalAgg,
+        recentLogs,
+        myHoursByDayAgg,
       ] = await Promise.all([
         Project.countDocuments(projectVisibility),
         Task.countDocuments({ assignees: userObjectId }),
@@ -52,6 +99,31 @@ export async function GET(_req: NextRequest) {
           .populate({ path: "project", select: "name projectId" })
           .select("title status project updatedAt")
           .lean(),
+        TimeLog.aggregate([
+          { $match: { user: userObjectId, date: { $gte: weekStart } } },
+          { $group: { _id: null, total: { $sum: "$hours" } } },
+        ]),
+        TimeLog.aggregate([
+          { $match: { user: userObjectId } },
+          { $group: { _id: null, total: { $sum: "$hours" } } },
+        ]),
+        TimeLog.find({ user: userObjectId })
+          .sort({ date: -1, createdAt: -1 })
+          .limit(5)
+          .populate({ path: "project", select: "name projectId" })
+          .populate({ path: "task", select: "title taskId" })
+          .lean(),
+        TimeLog.aggregate([
+          { $match: { user: userObjectId, date: { $gte: trendStart } } },
+          {
+            $group: {
+              _id: {
+                $dateToString: { format: "%Y-%m-%d", date: "$date" },
+              },
+              total: { $sum: "$hours" },
+            },
+          },
+        ]),
       ]);
 
       const statusBreakdown = Object.fromEntries(
@@ -71,10 +143,17 @@ export async function GET(_req: NextRequest) {
           tasks: tasksTotal,
           tasksOpen: openCount,
           tasksDone: doneCount,
+          hoursWeek: myLogsWeekAgg[0]?.total ?? 0,
+          hoursTotal: myLogsTotalAgg[0]?.total ?? 0,
         },
         statusBreakdown,
         recentProjects,
         recentTasks,
+        recentLogs,
+        hoursByDay: buildHoursByDay(
+          (myHoursByDayAgg as { _id: string; total: number }[]) ?? [],
+          7
+        ),
       });
     }
 
@@ -89,6 +168,10 @@ export async function GET(_req: NextRequest) {
       recentProjects,
       recentTasks,
       recentUsers,
+      hoursWeekAgg,
+      hoursTotalAgg,
+      topLoggersAgg,
+      hoursByDayAgg,
     ] = await Promise.all([
       Project.countDocuments({}),
       Project.countDocuments({ status: "active" }),
@@ -115,6 +198,47 @@ export async function GET(_req: NextRequest) {
         .limit(5)
         .select("name email role status createdAt")
         .lean(),
+      TimeLog.aggregate([
+        { $match: { date: { $gte: weekStart } } },
+        { $group: { _id: null, total: { $sum: "$hours" } } },
+      ]),
+      TimeLog.aggregate([
+        { $group: { _id: null, total: { $sum: "$hours" } } },
+      ]),
+      TimeLog.aggregate([
+        { $match: { date: { $gte: weekStart } } },
+        { $group: { _id: "$user", total: { $sum: "$hours" } } },
+        { $sort: { total: -1 } },
+        { $limit: 5 },
+        {
+          $lookup: {
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "user",
+          },
+        },
+        { $unwind: "$user" },
+        {
+          $project: {
+            _id: 0,
+            userId: "$_id",
+            name: "$user.name",
+            email: "$user.email",
+            role: "$user.role",
+            total: 1,
+          },
+        },
+      ]),
+      TimeLog.aggregate([
+        { $match: { date: { $gte: trendStart } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+            total: { $sum: "$hours" },
+          },
+        },
+      ]),
     ]);
 
     const statusBreakdown = Object.fromEntries(
@@ -141,12 +265,19 @@ export async function GET(_req: NextRequest) {
         tasks: tasksTotal,
         users: usersTotal,
         usersActive,
+        hoursWeek: hoursWeekAgg[0]?.total ?? 0,
+        hoursTotal: hoursTotalAgg[0]?.total ?? 0,
       },
       statusBreakdown,
       roleBreakdown,
       recentProjects,
       recentTasks,
       recentUsers,
+      topLoggers: topLoggersAgg,
+      hoursByDay: buildHoursByDay(
+        (hoursByDayAgg as { _id: string; total: number }[]) ?? [],
+        7
+      ),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

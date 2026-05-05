@@ -625,3 +625,6 @@
     transition: background-color 600000s 0s, color 600000s 0s;
   }
 }
+html {
+  font-size: 17.6px;
+}

@@ -13,8 +13,10 @@ import { usePathname, useParams, useRouter, useSearchParams } from "next/navigat
 import {
   ArrowLeft,
   CalendarDays,
+  ChevronLeft,
   Check,
   ClipboardList,
+  Clock,
   FolderKanban,
   LayoutGrid,
   List as ListIcon,
@@ -46,6 +48,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -170,7 +173,28 @@ type Task = {
 const chromeTabClasses = cn(
   "group relative -mb-[2px] h-10 flex-none items-center gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 text-sm font-medium text-muted-foreground shadow-none",
   "hover:text-foreground",
-  "data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+  "data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+);
+
+const TAB_OVERVIEW = cn(
+  "bg-primary/10 hover:bg-primary/15",
+  "data-[state=active]:bg-primary/15 data-[state=active]:border-primary",
+  "[&>svg]:text-primary/70 data-[state=active]:[&>svg]:text-primary"
+);
+const TAB_TASKS = cn(
+  "bg-sky-500/10 hover:bg-sky-500/15",
+  "data-[state=active]:bg-sky-500/15 data-[state=active]:border-sky-500",
+  "[&>svg]:text-sky-600/80 data-[state=active]:[&>svg]:text-sky-600 dark:[&>svg]:text-sky-400/80 dark:data-[state=active]:[&>svg]:text-sky-400"
+);
+const TAB_FILES = cn(
+  "bg-violet-500/10 hover:bg-violet-500/15",
+  "data-[state=active]:bg-violet-500/15 data-[state=active]:border-violet-500",
+  "[&>svg]:text-violet-600/80 data-[state=active]:[&>svg]:text-violet-600 dark:[&>svg]:text-violet-400/80 dark:data-[state=active]:[&>svg]:text-violet-400"
+);
+const TAB_LOGS = cn(
+  "bg-emerald-500/10 hover:bg-emerald-500/15",
+  "data-[state=active]:bg-emerald-500/15 data-[state=active]:border-emerald-500",
+  "[&>svg]:text-emerald-600/80 data-[state=active]:[&>svg]:text-emerald-600 dark:[&>svg]:text-emerald-400/80 dark:data-[state=active]:[&>svg]:text-emerald-400"
 );
 
 const BOARD_COLUMNS: TaskStatusKey[] = [
@@ -304,6 +328,76 @@ export default function ProjectDetailPage() {
   >("all");
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState<string>("all");
   const [tab, setTab] = useState<string>("tasks");
+
+  type LogEntry = {
+    _id: string;
+    user: UserLite | null;
+    task: { _id: string; title: string; taskId?: string | null } | null;
+    date: string;
+    startTime: string;
+    endTime: string;
+    hours: number;
+    note: string;
+    createdAt?: string;
+  };
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsSubmitting, setLogsSubmitting] = useState(false);
+  const [logPage, setLogPage] = useState(1);
+  const LOG_PAGE_SIZE = 10;
+  const [logTotal, setLogTotal] = useState(0);
+  const [logTotalHours, setLogTotalHours] = useState(0);
+  const [logTotalPages, setLogTotalPages] = useState(1);
+  const [logTaskId, setLogTaskId] = useState<string>("project");
+  const [logDate, setLogDate] = useState<Date | null>(new Date());
+  const [logStartHour, setLogStartHour] = useState<string>("09");
+  const [logStartMin, setLogStartMin] = useState<string>("00");
+  const [logEndHour, setLogEndHour] = useState<string>("10");
+  const [logEndMin, setLogEndMin] = useState<string>("00");
+  const [logNote, setLogNote] = useState<string>("");
+  const [logUserFilter, setLogUserFilter] = useState<string>("all");
+  const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const HOUR_OPTIONS = useMemo(
+    () => Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0")),
+    [],
+  );
+  const MIN_OPTIONS = useMemo(() => ["00", "15", "30", "45"], []);
+  const computedLogHours = useMemo(() => {
+    const start = parseInt(logStartHour, 10) * 60 + parseInt(logStartMin, 10);
+    const end = parseInt(logEndHour, 10) * 60 + parseInt(logEndMin, 10);
+    const diff = end - start;
+    return diff > 0 ? +(diff / 60).toFixed(2) : 0;
+  }, [logStartHour, logStartMin, logEndHour, logEndMin]);
+
+  const fetchLogs = useCallback(async () => {
+    if (!project?._id) return;
+    setLogsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(logPage));
+      params.set("limit", String(LOG_PAGE_SIZE));
+      if (logUserFilter !== "all") params.set("userId", logUserFilter);
+      const res = await fetch(
+        `/api/projects/${project._id}/logs?${params.toString()}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) throw new Error("Failed to load logs");
+      const data = await res.json();
+      setLogs(data.logs ?? []);
+      setLogTotal(data.total ?? 0);
+      setLogTotalHours(data.totalHours ?? 0);
+      setLogTotalPages(data.totalPages ?? 1);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load logs";
+      toast.error(msg);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [project?._id, logPage, logUserFilter]);
+
+  useEffect(() => {
+    if (tab === "logs") fetchLogs();
+  }, [tab, fetchLogs]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<TaskStatusKey | null>(null);
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
@@ -1097,34 +1191,33 @@ export default function ProjectDetailPage() {
         >
           <div className="relative">
             <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b-2 border-border/60 bg-transparent px-2 py-0 shadow-none sm:px-3">
-              <button
-                type="button"
-                aria-label="Back to projects"
-                onClick={() => router.push("/dashboard/projects")}
-                className="mr-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <ArrowLeft className="size-4" />
-              </button>
               <TabsTrigger
                 value="overview"
-                className={cn(chromeTabClasses, "bg-primary/10 data-[state=active]:bg-primary/15")}
+                className={cn(chromeTabClasses, TAB_OVERVIEW)}
               >
-                <FolderKanban className="size-4 text-muted-foreground group-data-[state=active]:text-primary" />
+                <FolderKanban className="size-4" />
                 <span>Overview</span>
               </TabsTrigger>
               <TabsTrigger
                 value="tasks"
-                className={cn(chromeTabClasses, "bg-primary/10 data-[state=active]:bg-primary/15")}
+                className={cn(chromeTabClasses, TAB_TASKS)}
               >
-                <ListChecks className="size-4 text-muted-foreground group-data-[state=active]:text-primary" />
+                <ListChecks className="size-4" />
                 <span>Tasks</span>
               </TabsTrigger>
               <TabsTrigger
                 value="files"
-                className={cn(chromeTabClasses, "bg-primary/10 data-[state=active]:bg-primary/15")}
+                className={cn(chromeTabClasses, TAB_FILES)}
               >
-                <Paperclip className="size-4 text-muted-foreground group-data-[state=active]:text-primary" />
+                <Paperclip className="size-4" />
                 <span>Files</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="logs"
+                className={cn(chromeTabClasses, TAB_LOGS)}
+              >
+                <Clock className="size-4" />
+                <span>Logs</span>
               </TabsTrigger>
               {pendingTaskTabIds.map((tid) => (
                 <TabsTrigger
@@ -1170,6 +1263,15 @@ export default function ProjectDetailPage() {
                   </span>
                 </TabsTrigger>
               ))}
+              <button
+                type="button"
+                aria-label="Back to projects"
+                title="Back to projects"
+                onClick={() => router.push("/dashboard/projects")}
+                className="group/back ml-auto mt-1 flex size-8 shrink-0 cursor-pointer items-center justify-center self-start rounded-md border border-border/60 bg-background text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+              >
+                <ChevronLeft className="size-4 transition-transform group-hover/back:-translate-x-0.5" />
+              </button>
             </TabsList>
           </div>
 
@@ -2044,6 +2146,437 @@ export default function ProjectDetailPage() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent
+            value="logs"
+            className="mt-2 flex flex-1 flex-col lg:min-h-0"
+          >
+            {(() => {
+              const userOptions = isAdmin
+                ? Array.from(
+                    new Map(
+                      [
+                        ...(project.assignees ?? []),
+                        ...(project.reportingTo ?? []),
+                      ].map((u) => [u._id, { id: u._id, name: u.name }]),
+                    ).values(),
+                  )
+                : [];
+
+              return (
+                <div className="flex flex-1 flex-col lg:min-h-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-2 shrink-0 sm:px-6">
+                    <div className="flex items-center gap-2">
+                      <Clock className="size-4 text-muted-foreground" />
+                      <h2 className="text-sm font-semibold">Logs</h2>
+                      <span className="rounded-full border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        {logsLoading ? "…" : logTotal}
+                      </span>
+                      <span className="hidden text-xs text-muted-foreground sm:inline">
+                        · {logTotalHours}h total
+                      </span>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setLogTaskId("project");
+                        setLogDate(new Date());
+                        setLogStartHour("09");
+                        setLogStartMin("00");
+                        setLogEndHour("10");
+                        setLogEndMin("00");
+                        setLogNote("");
+                        setLogDialogOpen(true);
+                      }}
+                    >
+                      <Plus className="mr-2 size-4" /> Add log
+                    </Button>
+                  </div>
+
+                  {(isAdmin || logTotal > 0) && (
+                    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/40 px-4 py-2 sm:px-6">
+                      {isAdmin && (
+                        <Select
+                          value={logUserFilter}
+                          onValueChange={(v) => {
+                            setLogUserFilter(v);
+                            setLogPage(1);
+                          }}
+                        >
+                          <SelectTrigger size="sm" className="h-8 w-44 shadow-none">
+                            <SelectValue placeholder="All users" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All users</SelectItem>
+                            {userOptions.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {isAdmin && logUserFilter !== "all" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setLogUserFilter("all");
+                            setLogPage(1);
+                          }}
+                          className="h-8 text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="mr-1 size-3.5" /> Clear
+                        </Button>
+                      )}
+                      <span className="ml-auto text-[11px] text-muted-foreground">
+                        {logTotal} of {logTotal}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                    <div className="md:flex-1 md:overflow-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-border/40 bg-muted/40 hover:bg-muted/40">
+                            <TableHead className="h-9 w-48 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              User
+                            </TableHead>
+                            <TableHead className="h-9 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              Task
+                            </TableHead>
+                            <TableHead className="h-9 w-32 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              Date
+                            </TableHead>
+                            <TableHead className="h-9 w-40 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              Time
+                            </TableHead>
+                            <TableHead className="h-9 w-28 px-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              Duration
+                            </TableHead>
+                            <TableHead className="h-9 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              Note
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {logsLoading ? (
+                            Array.from({ length: 4 }).map((_, i) => (
+                              <TableRow key={`skel-${i}`} className="border-border/40">
+                                <TableCell className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <Skeleton className="size-6 rounded-full" />
+                                    <Skeleton className="h-3 w-24" />
+                                  </div>
+                                </TableCell>
+                                <TableCell className="px-3 py-2">
+                                  <Skeleton className="h-3 w-40" />
+                                </TableCell>
+                                <TableCell className="px-3 py-2">
+                                  <Skeleton className="h-3 w-20" />
+                                </TableCell>
+                                <TableCell className="px-3 py-2">
+                                  <Skeleton className="h-3 w-28" />
+                                </TableCell>
+                                <TableCell className="px-3 py-2">
+                                  <Skeleton className="ml-auto h-3 w-12" />
+                                </TableCell>
+                                <TableCell className="px-3 py-2">
+                                  <Skeleton className="h-3 w-48" />
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : logs.length === 0 ? (
+                            <TableRow className="border-border/40 hover:bg-transparent">
+                              <TableCell
+                                colSpan={6}
+                                className="h-40 text-center text-sm text-muted-foreground"
+                              >
+                                <div className="flex flex-col items-center gap-1">
+                                  <Clock className="size-5 text-muted-foreground/60" />
+                                  <span className="font-medium">No logs yet</span>
+                                  <span className="text-xs">
+                                    Click Add log to record time worked.
+                                  </span>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            logs.map((l) => (
+                              <TableRow
+                                key={l._id}
+                                className="border-border/40 hover:bg-muted/30"
+                              >
+                                <TableCell className="px-3 py-2.5 align-top">
+                                  <div className="flex items-center gap-2">
+                                    <UserInitialsAvatar
+                                      name={l.user?.name ?? "?"}
+                                      role={l.user?.role}
+                                      className="size-7 text-[11px]"
+                                    />
+                                    <span className="text-sm font-medium">
+                                      {l.user?.name ?? "—"}
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="px-3 py-2.5 align-top text-sm">
+                                  {l.task ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      {l.task.taskId && (
+                                        <span className="font-mono text-xs text-muted-foreground">
+                                          {l.task.taskId}
+                                        </span>
+                                      )}
+                                      <span>{l.task.title}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      Project (general)
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="px-3 py-2.5 align-top text-sm tabular-nums text-muted-foreground whitespace-nowrap">
+                                  {formatShortDate(l.date)}
+                                </TableCell>
+                                <TableCell className="px-3 py-2.5 align-top font-mono text-sm tabular-nums text-muted-foreground whitespace-nowrap">
+                                  {l.startTime} – {l.endTime}
+                                </TableCell>
+                                <TableCell className="px-3 py-2.5 align-top text-right">
+                                  <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-sm font-semibold tabular-nums text-primary">
+                                    {l.hours}h
+                                  </span>
+                                </TableCell>
+                                <TableCell
+                                  className="max-w-[420px] whitespace-pre-wrap break-words px-3 py-2.5 align-top text-sm text-muted-foreground"
+                                  title={l.note || undefined}
+                                >
+                                  {l.note || "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {logTotal > LOG_PAGE_SIZE && (
+                      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/40 px-4 py-3 sm:px-6">
+                        <span className="text-xs text-muted-foreground">
+                          Showing {(logPage - 1) * LOG_PAGE_SIZE + 1}-
+                          {Math.min(logPage * LOG_PAGE_SIZE, logTotal)} of {logTotal}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setLogPage((p) => Math.max(1, p - 1))}
+                            disabled={logPage === 1 || logsLoading}
+                          >
+                            Prev
+                          </Button>
+                          <span className="text-xs text-muted-foreground">
+                            Page {logPage} / {logTotalPages}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setLogPage((p) => Math.min(logTotalPages, p + 1))
+                            }
+                            disabled={logPage >= logTotalPages || logsLoading}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
+                    <DialogContent className="sm:max-w-[640px]">
+                      <DialogHeader>
+                        <DialogTitle>Add time log</DialogTitle>
+                        <DialogDescription>
+                          Record hours worked on the project or a specific task.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-2">
+                        <div className="grid gap-1.5">
+                          <Label>Task</Label>
+                          <Select value={logTaskId} onValueChange={setLogTaskId}>
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue placeholder="Pick task" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="project">Project (general)</SelectItem>
+                              {tasks.map((t) => (
+                                <SelectItem key={t._id} value={t._id}>
+                                  {t.title}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid grid-cols-[1fr_1fr_1fr_90px] gap-3">
+                          <div className="grid gap-1.5">
+                            <Label>Date</Label>
+                            <DatePicker
+                              value={logDate}
+                              onChange={setLogDate}
+                              clearable={false}
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label>Start</Label>
+                            <div className="flex h-9 w-full items-center overflow-hidden rounded-md border bg-background">
+                              <Select value={logStartHour} onValueChange={setLogStartHour}>
+                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {HOUR_OPTIONS.map((h) => (
+                                    <SelectItem key={h} value={h}>
+                                      {h}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <span className="text-muted-foreground">:</span>
+                              <Select value={logStartMin} onValueChange={setLogStartMin}>
+                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {MIN_OPTIONS.map((m) => (
+                                    <SelectItem key={m} value={m}>
+                                      {m}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label>End</Label>
+                            <div className="flex h-9 w-full items-center overflow-hidden rounded-md border bg-background">
+                              <Select value={logEndHour} onValueChange={setLogEndHour}>
+                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {HOUR_OPTIONS.map((h) => (
+                                    <SelectItem key={h} value={h}>
+                                      {h}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <span className="text-muted-foreground">:</span>
+                              <Select value={logEndMin} onValueChange={setLogEndMin}>
+                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {MIN_OPTIONS.map((m) => (
+                                    <SelectItem key={m} value={m}>
+                                      {m}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label>Duration</Label>
+                            <div
+                              className={cn(
+                                "flex h-9 w-full items-center justify-center rounded-md border px-3 text-sm font-semibold tabular-nums",
+                                computedLogHours > 0
+                                  ? "border-primary/40 bg-primary/10 text-primary"
+                                  : "bg-background text-muted-foreground",
+                              )}
+                            >
+                              {computedLogHours > 0 ? `${computedLogHours}h` : "—"}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label>Note</Label>
+                          <Textarea
+                            rows={4}
+                            className="w-full resize-y"
+                            value={logNote}
+                            onChange={(e) => setLogNote(e.target.value)}
+                            placeholder="What did you work on?"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setLogDialogOpen(false)}
+                          disabled={logsSubmitting}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          disabled={logsSubmitting}
+                          onClick={async () => {
+                            if (!session || !logDate) {
+                              toast.error("Pick date");
+                              return;
+                            }
+                            if (computedLogHours <= 0) {
+                              toast.error("End time must be after start time");
+                              return;
+                            }
+                            setLogsSubmitting(true);
+                            try {
+                              const res = await fetch(
+                                `/api/projects/${project._id}/logs`,
+                                {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    task: logTaskId === "project" ? null : logTaskId,
+                                    date: logDate.toISOString(),
+                                    startTime: `${logStartHour}:${logStartMin}`,
+                                    endTime: `${logEndHour}:${logEndMin}`,
+                                    note: logNote.trim(),
+                                  }),
+                                }
+                              );
+                              if (!res.ok) {
+                                const data = await res.json().catch(() => ({}));
+                                throw new Error(data.error ?? "Failed to add log");
+                              }
+                              setLogNote("");
+                              setLogDialogOpen(false);
+                              toast.success("Log added");
+                              setLogPage(1);
+                              fetchLogs();
+                            } catch (err) {
+                              const msg = err instanceof Error ? err.message : "Failed";
+                              toast.error(msg);
+                            } finally {
+                              setLogsSubmitting(false);
+                            }
+                          }}
+                        >
+                          {logsSubmitting ? "Saving…" : "Save log"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              );
+            })()}
           </TabsContent>
 
           {pendingTaskTabIds.map((tid) => (

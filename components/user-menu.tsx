@@ -20,9 +20,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -47,7 +44,7 @@ type SessionUser = {
 
 export function UserMenu({ user }: { user: SessionUser }) {
   const router = useRouter();
-  const { setTheme, theme } = useTheme();
+  const { theme } = useTheme();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -84,61 +81,73 @@ export function UserMenu({ user }: { user: SessionUser }) {
             <UserInitialsAvatar name={user.name} role={user.role} className="size-9" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuLabel className="flex items-center gap-3 py-2">
-            <UserInitialsAvatar name={user.name} role={user.role} />
+        <DropdownMenuContent
+          align="end"
+          sideOffset={6}
+          className="w-64 p-1.5"
+        >
+          <div className="flex items-center gap-2.5 px-2 py-2">
+            <UserInitialsAvatar
+              name={user.name}
+              role={user.role}
+              className="size-9 text-xs"
+            />
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium truncate">{user.name}</div>
-              <div className="text-xs text-muted-foreground truncate font-normal">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-semibold">
+                  {user.name}
+                </span>
+                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {ROLE_LABELS[user.role]}
+                </span>
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
                 {user.email}
               </div>
-              <div className="mt-1 inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium">
-                {ROLE_LABELS[user.role]}
-              </div>
             </div>
-          </DropdownMenuLabel>
+          </div>
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem disabled>
-            <UserIcon className="mr-2 size-4" /> Profile
+          <DropdownMenuItem
+            className="gap-2.5 px-2 py-2 text-sm"
+            onClick={() => router.push("/dashboard/settings#general")}
+          >
+            <UserIcon className="size-4 text-muted-foreground" />
+            Profile
           </DropdownMenuItem>
 
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <ThemeIcon className="mr-2 size-4" />
-              Theme
-              <span className="ml-auto text-xs text-muted-foreground capitalize">
-                {theme ?? "system"}
-              </span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuItem onClick={() => setTheme("light")}>
-                <Sun className="mr-2 size-4" /> Light
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("dark")}>
-                <Moon className="mr-2 size-4" /> Dark
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("system")}>
-                <Monitor className="mr-2 size-4" /> System
-              </DropdownMenuItem>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          <DropdownMenuItem
+            className="gap-2.5 px-2 py-2 text-sm"
+            onClick={() => router.push("/dashboard/settings#general")}
+          >
+            <ThemeIcon className="size-4 text-muted-foreground" />
+            Theme
+            <span className="ml-auto text-xs capitalize text-muted-foreground">
+              {theme ?? "system"}
+            </span>
+          </DropdownMenuItem>
 
-          <DropdownMenuItem disabled>
-            <Palette className="mr-2 size-4" /> Preferences
+          <DropdownMenuItem
+            className="gap-2.5 px-2 py-2 text-sm"
+            onClick={() => router.push("/dashboard/settings#notifications")}
+          >
+            <Palette className="size-4 text-muted-foreground" />
+            Preferences
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
 
           <DropdownMenuItem
             variant="destructive"
+            className="gap-2.5 px-2 py-2 text-sm"
             onSelect={(e) => {
               e.preventDefault();
               setConfirmOpen(true);
             }}
           >
-            <LogOut className="mr-2 size-4" /> Log out
+            <LogOut className="size-4" />
+            Log out
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

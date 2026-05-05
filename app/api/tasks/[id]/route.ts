@@ -16,14 +16,22 @@ import Comment from "@/models/Comment";
 import { getSession } from "@/lib/auth";
 import { getProjectForSession, canManageProject } from "@/lib/project-access";
 import { fieldError, validationResponse } from "@/lib/api-errors";
-import { sanitizeRichHtml } from "@/lib/sanitize";
+import {
+  extractMentionIds,
+  sanitizeRichHtml,
+  stripHtml,
+} from "@/lib/sanitize";
 import {
   getAppUrl,
   sendTaskAssignedEmail,
   sendTaskUnassignedEmail,
 } from "@/lib/mailer";
 import { createNotifications, type NotifyInput } from "@/lib/notify";
-import { notifyTaskStatusChangeSlack } from "@/lib/slack-notify";
+import {
+  notifyMentionSlack,
+  notifyTaskAssignmentSlack,
+  notifyTaskStatusChangeSlack,
+} from "@/lib/slack-notify";
 
 const subtaskSchema = z.object({
   _id: z.string().optional(),
@@ -359,6 +367,55 @@ export async function PATCH(
               addNotify(u, "reportingPerson", "task_unassigned")
             );
             createNotifications(notifyItems);
+
+            const slackChanges = [
+              ...addedAss.map(
+                (uid) =>
+                  ({
+                    userId: uid,
+                    kind: "assigned",
+                    role: "assignee",
+                  }) as const
+              ),
+              ...removedAss.map(
+                (uid) =>
+                  ({
+                    userId: uid,
+                    kind: "unassigned",
+                    role: "assignee",
+                  }) as const
+              ),
+              ...addedRep.map(
+                (uid) =>
+                  ({
+                    userId: uid,
+                    kind: "assigned",
+                    role: "reportingPerson",
+                  }) as const
+              ),
+              ...removedRep.map(
+                (uid) =>
+                  ({
+                    userId: uid,
+                    kind: "unassigned",
+                    role: "reportingPerson",
+                  }) as const
+              ),
+            ];
+            notifyTaskAssignmentSlack(slackChanges, {
+              actorName: session.name,
+              project: {
+                id: projectMeta._id,
+                projectId: projectMeta.projectId,
+                name: projectMeta.name,
+              },
+              task: {
+                id: String(updated._id),
+                taskId: updated.taskId ?? "",
+                title: updated.title,
+              },
+              taskUrl,
+            }).catch(() => {});
           }
         }
       } catch {
@@ -585,6 +642,87 @@ export async function PATCH(
         }
       } catch {
         // swallow — logging failure shouldn't break update
+      }
+
+      // Description mentions — DM newly-mentioned users
+      try {
+        if (parsed.data.description !== undefined) {
+          const prevDescription = (access.task.description as string) ?? "";
+          const nextDescription =
+            (update.description as string | undefined) ?? "";
+          const prevMentions = new Set(extractMentionIds(prevDescription));
+          const nextMentionsArr = extractMentionIds(nextDescription).filter(
+            (mid) => mongoose.Types.ObjectId.isValid(mid)
+          );
+          const addedMentions = nextMentionsArr.filter(
+            (mid) => !prevMentions.has(mid)
+          );
+          if (addedMentions.length > 0) {
+            const project = access.project;
+            const allowed = new Set<string>([
+              ...(project.assignees ?? []).map((a) => String(a)),
+              ...(access.task.assignees ?? []).map((a) => String(a)),
+              ...(access.task.reportingPersons ?? []).map((a) => String(a)),
+            ]);
+            for (const r of project.reportingTo ?? [])
+              allowed.add(String(r));
+            if (project.createdBy) allowed.add(String(project.createdBy));
+            if (access.task.createdBy)
+              allowed.add(String(access.task.createdBy));
+            allowed.add(session.sub);
+
+            const recipientIds = addedMentions.filter((x) => allowed.has(x));
+            if (recipientIds.length > 0) {
+              const proj = updated.project as unknown as {
+                _id: unknown;
+                name: string;
+                projectId: string;
+              } | null;
+              const snippet = stripHtml(nextDescription).slice(0, 140);
+
+              const inAppNotifyItems: NotifyInput[] = recipientIds
+                .filter((uid) => uid !== session.sub)
+                .map((uid) => ({
+                  recipient: uid,
+                  actor: session.sub,
+                  type: "mention_task",
+                  project: proj ? String(proj._id) : null,
+                  task: String(updated._id),
+                  message: `${session.name} mentioned you in task "${updated.title}"`,
+                  data: {
+                    snippet,
+                    taskId: updated.taskId,
+                    projectId: proj?.projectId,
+                  },
+                }));
+              if (inAppNotifyItems.length > 0)
+                createNotifications(inAppNotifyItems);
+
+              if (proj) {
+                const taskUrl = `${getAppUrl()}/dashboard/projects/${String(
+                  proj._id
+                )}?task=${String(updated._id)}`;
+                notifyMentionSlack(recipientIds, {
+                  actorName: session.name,
+                  project: {
+                    id: String(proj._id),
+                    projectId: proj.projectId,
+                    name: proj.name ?? "",
+                  },
+                  task: {
+                    id: String(updated._id),
+                    taskId: updated.taskId ?? "",
+                    title: updated.title,
+                  },
+                  snippet,
+                  url: taskUrl,
+                }).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch {
+        // swallow description mention errors
       }
 
       // Subtask mention email

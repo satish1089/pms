@@ -14,9 +14,18 @@ import { nextSeq } from "@/models/Counter";
 import { getSession } from "@/lib/auth";
 import { getProjectForSession } from "@/lib/project-access";
 import { fieldError, validationResponse } from "@/lib/api-errors";
-import { sanitizeRichHtml } from "@/lib/sanitize";
+import {
+  extractMentionIds,
+  sanitizeRichHtml,
+  stripHtml,
+} from "@/lib/sanitize";
 import { getAppUrl, sendTaskAssignedEmail } from "@/lib/mailer";
 import { createNotifications, type NotifyInput } from "@/lib/notify";
+import {
+  notifyMentionSlack,
+  notifyTaskAssignmentSlack,
+} from "@/lib/slack-notify";
+import User from "@/models/User";
 
 const isoDate = z
   .union([z.string().datetime(), z.literal(""), z.null()])
@@ -163,16 +172,27 @@ export async function POST(
           user: U;
           role: "assignee" | "reportingPerson";
         }[] = [];
+        const slackTargets: {
+          userId: string;
+          role: "assignee" | "reportingPerson";
+        }[] = [];
         for (const u of (populated.assignees ?? []) as unknown as U[]) {
-          if (u && String(u._id) !== session.sub) {
+          if (!u) continue;
+          if (String(u._id) !== session.sub) {
             recipients.push({ user: u, role: "assignee" });
           }
+          slackTargets.push({ userId: String(u._id), role: "assignee" });
         }
         for (const u of (populated.reportingPersons ??
           []) as unknown as U[]) {
-          if (u && String(u._id) !== session.sub) {
+          if (!u) continue;
+          if (String(u._id) !== session.sub) {
             recipients.push({ user: u, role: "reportingPerson" });
           }
+          slackTargets.push({
+            userId: String(u._id),
+            role: "reportingPerson",
+          });
         }
 
         Promise.allSettled(
@@ -205,6 +225,90 @@ export async function POST(
           },
         }));
         createNotifications(notifyItems);
+
+        notifyTaskAssignmentSlack(
+          slackTargets.map((t) => ({
+            userId: t.userId,
+            kind: "assigned" as const,
+            role: t.role,
+          })),
+          {
+            actorName: session.name,
+            project: {
+              id: projectMeta._id,
+              projectId: projectMeta.projectId,
+              name: projectMeta.name,
+            },
+            task: {
+              id: String(populated._id),
+              taskId: populated.taskId ?? "",
+              title: populated.title,
+            },
+            taskUrl,
+          }
+        ).catch(() => {});
+
+        // Mentions inside task description
+        try {
+          const mentionIds = extractMentionIds(description).filter((mid) =>
+            mongoose.Types.ObjectId.isValid(mid)
+          );
+          if (mentionIds.length > 0) {
+            const allowed = new Set<string>([
+              ...(project.assignees ?? []).map((a) => String(a)),
+              ...slackTargets.map((t) => t.userId),
+            ]);
+            for (const r of project.reportingTo ?? []) allowed.add(String(r));
+            if (project.createdBy) allowed.add(String(project.createdBy));
+            allowed.add(session.sub);
+
+            const recipientIds = mentionIds.filter((mid) =>
+              allowed.has(mid)
+            );
+            if (recipientIds.length > 0) {
+              const users = await User.find({ _id: { $in: recipientIds } })
+                .select("name email")
+                .lean();
+              const snippet = stripHtml(description).slice(0, 140);
+
+              const inAppNotifyItems: NotifyInput[] = users
+                .filter((u) => String(u._id) !== session.sub)
+                .map((u) => ({
+                  recipient: String(u._id),
+                  actor: session.sub,
+                  type: "mention_task",
+                  project: projectMeta._id,
+                  task: String(populated._id),
+                  message: `${session.name} mentioned you in task "${populated.title}"`,
+                  data: {
+                    snippet,
+                    taskId: populated.taskId,
+                    projectId: projectMeta.projectId,
+                  },
+                }));
+              if (inAppNotifyItems.length > 0)
+                createNotifications(inAppNotifyItems);
+
+              notifyMentionSlack(recipientIds, {
+                actorName: session.name,
+                project: {
+                  id: projectMeta._id,
+                  projectId: projectMeta.projectId,
+                  name: projectMeta.name,
+                },
+                task: {
+                  id: String(populated._id),
+                  taskId: populated.taskId ?? "",
+                  title: populated.title,
+                },
+                snippet,
+                url: taskUrl,
+              }).catch(() => {});
+            }
+          }
+        } catch {
+          // swallow mention errors
+        }
       } catch {
         // swallow mail errors
       }
