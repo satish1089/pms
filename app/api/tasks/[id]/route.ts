@@ -23,6 +23,7 @@ import {
   sendTaskUnassignedEmail,
 } from "@/lib/mailer";
 import { createNotifications, type NotifyInput } from "@/lib/notify";
+import { notifyTaskStatusChangeSlack } from "@/lib/slack-notify";
 
 const subtaskSchema = z.object({
   _id: z.string().optional(),
@@ -539,6 +540,7 @@ export async function PATCH(
               )
             );
           }
+          const slackStakeholderIds = Array.from(stakeholderIds);
           stakeholderIds.delete(session.sub);
 
           const statusNotify: NotifyInput[] = Array.from(stakeholderIds).map(
@@ -558,6 +560,28 @@ export async function PATCH(
             })
           );
           createNotifications(statusNotify);
+
+          if (proj) {
+            const taskUrl = `${getAppUrl()}/dashboard/projects/${String(
+              proj._id
+            )}?task=${String(updated._id)}`;
+            notifyTaskStatusChangeSlack(slackStakeholderIds, {
+              actorName: session.name,
+              project: {
+                id: String(proj._id),
+                projectId: proj.projectId,
+                name: (proj as unknown as { name: string }).name ?? "",
+              },
+              task: {
+                id: String(updated._id),
+                taskId: updated.taskId ?? "",
+                title: taskTitle,
+              },
+              from,
+              to,
+              taskUrl,
+            }).catch(() => {});
+          }
         }
       } catch {
         // swallow — logging failure shouldn't break update

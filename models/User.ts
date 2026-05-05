@@ -2,6 +2,32 @@ import mongoose, { Schema, Model, InferSchemaType } from "mongoose";
 import bcrypt from "bcryptjs";
 import { USER_ROLES } from "@/lib/roles";
 
+const SlackSettingsSchema = new Schema(
+  {
+    connected: { type: Boolean, default: false },
+    slackUserId: { type: String, default: "" },
+    slackTeamId: { type: String, default: "" },
+    slackHandle: { type: String, default: "" },
+    notifyOnAssign: { type: Boolean, default: true },
+    notifyOnComment: { type: Boolean, default: true },
+    notifyOnStatusChange: { type: Boolean, default: true },
+    connectedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const UserSettingsSchema = new Schema(
+  {
+    theme: {
+      type: String,
+      enum: ["light", "dark", "system"],
+      default: "system",
+    },
+    slack: { type: SlackSettingsSchema, default: () => ({}) },
+  },
+  { _id: false }
+);
+
 const UserSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -24,6 +50,7 @@ const UserSchema = new Schema(
       enum: ["active", "inactive"],
       default: "active",
     },
+    settings: { type: UserSettingsSchema, default: () => ({}) },
   },
   { timestamps: true }
 );
@@ -37,6 +64,12 @@ UserSchema.pre<mongoose.HydratedDocument<UserShape>>("save", async function () {
 });
 
 export type UserDoc = UserShape & { _id: mongoose.Types.ObjectId };
+
+if (process.env.NODE_ENV !== "production" && mongoose.models.User) {
+  delete mongoose.models.User;
+  delete (mongoose as unknown as { modelSchemas?: Record<string, unknown> })
+    .modelSchemas?.User;
+}
 
 const User: Model<UserDoc> =
   (mongoose.models.User as Model<UserDoc>) ||

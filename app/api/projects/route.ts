@@ -15,6 +15,7 @@ import {
   sendProjectAssignedEmail,
 } from "@/lib/mailer";
 import { createNotifications, type NotifyInput } from "@/lib/notify";
+import { notifyProjectAssignmentSlack } from "@/lib/slack-notify";
 
 const createSchema = z.object({
   name: z.string().min(2, "Project name must be at least 2 characters"),
@@ -162,15 +163,23 @@ export async function POST(req: NextRequest) {
       const actorName = session.name;
       type P = { _id: unknown; name: string; email: string };
       const recipients: { user: P; role: "assignee" | "reportingTo" }[] = [];
+      const slackTargets: {
+        userId: string;
+        role: "assignee" | "reportingTo";
+      }[] = [];
       for (const a of (populated.assignees ?? []) as unknown as P[]) {
-        if (a && String(a._id) !== session.sub) {
+        if (!a) continue;
+        if (String(a._id) !== session.sub) {
           recipients.push({ user: a, role: "assignee" });
         }
+        slackTargets.push({ userId: String(a._id), role: "assignee" });
       }
       for (const rt of (populated.reportingTo ?? []) as unknown as P[]) {
-        if (rt && String(rt._id) !== session.sub) {
+        if (!rt) continue;
+        if (String(rt._id) !== session.sub) {
           recipients.push({ user: rt, role: "reportingTo" });
         }
+        slackTargets.push({ userId: String(rt._id), role: "reportingTo" });
       }
 
       Promise.allSettled(
@@ -201,6 +210,24 @@ export async function POST(req: NextRequest) {
         data: { role: r.role, projectId: populated.projectId },
       }));
       createNotifications(notifyItems);
+
+      notifyProjectAssignmentSlack(
+        slackTargets.map((t) => ({
+          userId: t.userId,
+          kind: "assigned" as const,
+          role: t.role,
+        })),
+        {
+          actorName,
+          actorId: session.sub,
+          project: {
+            id: String(populated._id),
+            projectId: populated.projectId,
+            name: populated.name,
+          },
+          projectUrl,
+        }
+      ).catch(() => {});
     }
 
     return NextResponse.json({ project: populated }, { status: 201 });

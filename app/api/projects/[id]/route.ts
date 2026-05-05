@@ -16,6 +16,7 @@ import {
   sendProjectUnassignedEmail,
 } from "@/lib/mailer";
 import { createNotifications, type NotifyInput } from "@/lib/notify";
+import { notifyProjectAssignmentSlack } from "@/lib/slack-notify";
 
 const updateSchema = z.object({
   name: z.string().min(2, "Project name must be at least 2 characters").optional(),
@@ -304,6 +305,39 @@ export async function PATCH(
         addedRt.forEach((u) => add(u, "reportingTo", "project_assigned"));
         removedRt.forEach((u) => add(u, "reportingTo", "project_unassigned"));
         createNotifications(notifyItems);
+
+        const slackChanges = [
+          ...addedAssignees.map(
+            (uid) =>
+              ({ userId: uid, kind: "assigned", role: "assignee" }) as const
+          ),
+          ...removedAssignees.map(
+            (uid) =>
+              ({ userId: uid, kind: "unassigned", role: "assignee" }) as const
+          ),
+          ...addedRt.map(
+            (uid) =>
+              ({ userId: uid, kind: "assigned", role: "reportingTo" }) as const
+          ),
+          ...removedRt.map(
+            (uid) =>
+              ({
+                userId: uid,
+                kind: "unassigned",
+                role: "reportingTo",
+              }) as const
+          ),
+        ];
+        notifyProjectAssignmentSlack(slackChanges, {
+          actorName: session.name,
+          actorId: session.sub,
+          project: {
+            id: String(project._id),
+            projectId: project.projectId,
+            name: project.name,
+          },
+          projectUrl,
+        }).catch(() => {});
       }
     } catch {
       // swallow mail diff errors

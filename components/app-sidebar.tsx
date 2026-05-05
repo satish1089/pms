@@ -7,6 +7,7 @@ import {
   Users,
   FolderKanban,
   ListChecks,
+  Settings,
 } from "lucide-react";
 
 import {
@@ -36,6 +37,7 @@ const mainNav: NavItem[] = [
   { title: "Projects", url: "/dashboard/projects", icon: FolderKanban },
   { title: "Tasks", url: "/dashboard/tasks", icon: ListChecks },
   { title: "Users", url: "/dashboard/users", icon: Users, adminOnly: true },
+  { title: "Settings", url: "/dashboard/settings", icon: Settings },
 ];
 
 const menuButtonClasses =

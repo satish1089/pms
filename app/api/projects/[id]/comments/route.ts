@@ -12,6 +12,8 @@ import { getProjectForSession } from "@/lib/project-access";
 import { validationResponse } from "@/lib/api-errors";
 import { extractMentionIds, sanitizeRichHtml, stripHtml } from "@/lib/sanitize";
 import { createNotifications, type NotifyInput } from "@/lib/notify";
+import { notifyMentionSlack } from "@/lib/slack-notify";
+import { getAppUrl } from "@/lib/mailer";
 
 const createSchema = z.object({
   body: z.string().min(1, "Comment cannot be empty"),
@@ -141,8 +143,8 @@ export async function POST(
       : null;
 
     try {
-      const mentionIds = extractMentionIds(sanitized).filter(
-        (mid) => mongoose.Types.ObjectId.isValid(mid) && mid !== session.sub
+      const mentionIds = extractMentionIds(sanitized).filter((mid) =>
+        mongoose.Types.ObjectId.isValid(mid)
       );
       if (mentionIds.length > 0) {
         const allowed = new Set<string>(
@@ -157,16 +159,30 @@ export async function POST(
             .lean();
 
           const snippet = stripHtml(sanitized).slice(0, 140);
-          const notifyItems: NotifyInput[] = users.map((u) => ({
-            recipient: String(u._id),
-            actor: session.sub,
-            type: "mention_project",
-            project: String(project._id),
-            comment: String(comment._id),
-            message: `${session.name} mentioned you in project "${project.name}"`,
-            data: { snippet, projectId: project.projectId },
-          }));
-          createNotifications(notifyItems);
+          const notifyItems: NotifyInput[] = users
+            .filter((u) => String(u._id) !== session.sub)
+            .map((u) => ({
+              recipient: String(u._id),
+              actor: session.sub,
+              type: "mention_project",
+              project: String(project._id),
+              comment: String(comment._id),
+              message: `${session.name} mentioned you in project "${project.name}"`,
+              data: { snippet, projectId: project.projectId },
+            }));
+          if (notifyItems.length > 0) createNotifications(notifyItems);
+
+          const projectUrl = `${getAppUrl()}/dashboard/projects/${String(project._id)}`;
+          notifyMentionSlack(recipientIds, {
+            actorName: session.name,
+            project: {
+              id: String(project._id),
+              projectId: project.projectId,
+              name: project.name,
+            },
+            snippet,
+            url: projectUrl,
+          }).catch(() => {});
         }
       }
     } catch {

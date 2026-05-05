@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
 
     const [users, total] = await Promise.all([
       User.find(filter)
+        .select("-settings")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
