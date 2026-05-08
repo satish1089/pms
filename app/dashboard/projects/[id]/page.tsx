@@ -372,6 +372,9 @@ export default function ProjectDetailPage() {
   const [logNote, setLogNote] = useState<string>("");
   const [logUserFilter, setLogUserFilter] = useState<string>("all");
   const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [pendingDeleteLog, setPendingDeleteLog] = useState<LogEntry | null>(null);
+  const [deletingLog, setDeletingLog] = useState(false);
   const computedLogHours = useMemo(() => {
     const start = parseInt(logStartHour, 10) * 60 + parseInt(logStartMin, 10);
     const end = parseInt(logEndHour, 10) * 60 + parseInt(logEndMin, 10);
@@ -475,8 +478,15 @@ export default function ProjectDetailPage() {
   const sessionUserId = session?._id;
   const isTaskCreator = (t: Task) =>
     !!sessionUserId && String(t.createdBy?._id ?? "") === sessionUserId;
+  const isTaskAssignee = (t: Task) =>
+    !!sessionUserId && (t.assignees ?? []).some((u) => u._id === sessionUserId);
+  const isTaskReporting = (t: Task) =>
+    !!sessionUserId &&
+    (t.reportingPersons ?? []).some((u) => u._id === sessionUserId);
   const canEditTask = (t: Task) => canEdit || isTaskCreator(t);
   const canDeleteTask = (t: Task) => canEdit || isTaskCreator(t);
+  const canChangeTaskStatus = (t: Task) =>
+    canEditTask(t) || isTaskAssignee(t) || isTaskReporting(t);
 
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
   const [deletingTask, setDeletingTask] = useState(false);
@@ -2218,6 +2228,7 @@ export default function ProjectDetailPage() {
                         onValueChange={(v) =>
                           moveTask(t._id, v as TaskStatusKey)
                         }
+                        disabled={!canChangeTaskStatus(t)}
                       >
                         <SelectTrigger
                           size="sm"
@@ -2428,6 +2439,7 @@ export default function ProjectDetailPage() {
                     <Button
                       size="sm"
                       onClick={() => {
+                        setEditingLogId(null);
                         setLogTaskId("project");
                         setLogDate(new Date());
                         setLogStartHour("09");
@@ -2507,6 +2519,9 @@ export default function ProjectDetailPage() {
                             <TableHead className="h-9 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                               Note
                             </TableHead>
+                            <TableHead className="h-9 w-20 px-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              <span className="sr-only">Actions</span>
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2534,12 +2549,15 @@ export default function ProjectDetailPage() {
                                 <TableCell className="px-3 py-2">
                                   <Skeleton className="h-3 w-48" />
                                 </TableCell>
+                                <TableCell className="px-3 py-2">
+                                  <Skeleton className="ml-auto h-3 w-12" />
+                                </TableCell>
                               </TableRow>
                             ))
                           ) : logs.length === 0 ? (
                             <TableRow className="border-border/40 hover:bg-transparent">
                               <TableCell
-                                colSpan={6}
+                                colSpan={7}
                                 className="h-40 text-center text-sm text-muted-foreground"
                               >
                                 <div className="flex flex-col items-center gap-1">
@@ -2602,6 +2620,44 @@ export default function ProjectDetailPage() {
                                 >
                                   {l.note || "—"}
                                 </TableCell>
+                                <TableCell className="px-3 py-2.5 align-top text-right">
+                                  {(canEdit ||
+                                    (sessionUserId &&
+                                      l.user?._id === sessionUserId)) && (
+                                    <div className="flex items-center justify-end gap-0.5">
+                                      <button
+                                        type="button"
+                                        aria-label="Edit log"
+                                        title="Edit log"
+                                        onClick={() => {
+                                          setEditingLogId(l._id);
+                                          setLogTaskId(l.task?._id ?? "project");
+                                          setLogDate(new Date(l.date));
+                                          const [sh, sm] = l.startTime.split(":");
+                                          const [eh, em] = l.endTime.split(":");
+                                          setLogStartHour(sh ?? "09");
+                                          setLogStartMin(sm ?? "00");
+                                          setLogEndHour(eh ?? "10");
+                                          setLogEndMin(em ?? "00");
+                                          setLogNote(l.note ?? "");
+                                          setLogDialogOpen(true);
+                                        }}
+                                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-primary"
+                                      >
+                                        <Pencil className="size-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        aria-label="Delete log"
+                                        title="Delete log"
+                                        onClick={() => setPendingDeleteLog(l)}
+                                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                      >
+                                        <Trash2 className="size-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </TableCell>
                               </TableRow>
                             ))
                           )}
@@ -2644,12 +2700,22 @@ export default function ProjectDetailPage() {
                     )}
                   </div>
 
-                  <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
+                  <Dialog
+                    open={logDialogOpen}
+                    onOpenChange={(open) => {
+                      setLogDialogOpen(open);
+                      if (!open) setEditingLogId(null);
+                    }}
+                  >
                     <DialogContent className="sm:max-w-[640px]">
                       <DialogHeader>
-                        <DialogTitle>Add time log</DialogTitle>
+                        <DialogTitle>
+                          {editingLogId ? "Edit time log" : "Add time log"}
+                        </DialogTitle>
                         <DialogDescription>
-                          Record hours worked on the project or a specific task.
+                          {editingLogId
+                            ? "Update hours worked on the project or task."
+                            : "Record hours worked on the project or a specific task."}
                         </DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4 py-2">
@@ -2750,10 +2816,13 @@ export default function ProjectDetailPage() {
                             }
                             setLogsSubmitting(true);
                             try {
+                              const isEdit = Boolean(editingLogId);
                               const res = await fetch(
-                                `/api/projects/${project._id}/logs`,
+                                isEdit
+                                  ? `/api/logs/${editingLogId}`
+                                  : `/api/projects/${project._id}/logs`,
                                 {
-                                  method: "POST",
+                                  method: isEdit ? "PATCH" : "POST",
                                   headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({
                                     task: logTaskId === "project" ? null : logTaskId,
@@ -2766,12 +2835,15 @@ export default function ProjectDetailPage() {
                               );
                               if (!res.ok) {
                                 const data = await res.json().catch(() => ({}));
-                                throw new Error(data.error ?? "Failed to add log");
+                                throw new Error(
+                                  data.error ?? (isEdit ? "Failed to update log" : "Failed to add log")
+                                );
                               }
                               setLogNote("");
                               setLogDialogOpen(false);
-                              toast.success("Log added");
-                              setLogPage(1);
+                              setEditingLogId(null);
+                              toast.success(isEdit ? "Log updated" : "Log added");
+                              if (!isEdit) setLogPage(1);
                               fetchLogs();
                             } catch (err) {
                               const msg = err instanceof Error ? err.message : "Failed";
@@ -2781,11 +2853,70 @@ export default function ProjectDetailPage() {
                             }
                           }}
                         >
-                          {logsSubmitting ? "Saving…" : "Save log"}
+                          {logsSubmitting
+                            ? "Saving…"
+                            : editingLogId
+                              ? "Save changes"
+                              : "Save log"}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
+
+                  <AlertDialog
+                    open={Boolean(pendingDeleteLog)}
+                    onOpenChange={(open) =>
+                      !open && !deletingLog && setPendingDeleteLog(null)
+                    }
+                  >
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this log?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {pendingDeleteLog
+                            ? `${pendingDeleteLog.hours}h on ${formatShortDate(pendingDeleteLog.date)} will be permanently removed.`
+                            : ""}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={deletingLog}>
+                          Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                          disabled={deletingLog}
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            if (!pendingDeleteLog) return;
+                            setDeletingLog(true);
+                            try {
+                              const res = await fetch(
+                                `/api/logs/${pendingDeleteLog._id}`,
+                                { method: "DELETE" }
+                              );
+                              if (!res.ok) {
+                                const data = await res.json().catch(() => ({}));
+                                throw new Error(
+                                  data.error ?? "Failed to delete log"
+                                );
+                              }
+                              toast.success("Log deleted");
+                              setPendingDeleteLog(null);
+                              fetchLogs();
+                            } catch (err) {
+                              const msg =
+                                err instanceof Error ? err.message : "Failed";
+                              toast.error(msg);
+                            } finally {
+                              setDeletingLog(false);
+                            }
+                          }}
+                          className="bg-destructive text-white hover:bg-destructive/90"
+                        >
+                          {deletingLog ? "Deleting…" : "Delete"}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               );
             })()}
@@ -2813,7 +2944,7 @@ export default function ProjectDetailPage() {
                 <div className="flex flex-col lg:h-full lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
                   <div className="scrollbar-hide min-w-0 lg:overflow-y-auto lg:border-r lg:border-border/40">
                     <div>
-                      <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+                      <div className="flex h-12 items-center gap-2 border-b border-border/40 px-4 sm:px-6">
                         <FileText className="size-4 text-primary" />
                         <h3 className="text-sm font-semibold tracking-tight">
                           Description
@@ -2845,6 +2976,8 @@ export default function ProjectDetailPage() {
                         mentionUsers={mentionUsersForTask(t._id)}
                         hashTasks={hashTasks}
                         projectMembers={project.assignees}
+                        canEdit={canChangeTaskStatus(t)}
+                        canManage={canEditTask(t)}
                         onSave={(next, subtaskMention) =>
                           saveSubtasks(t._id, next, subtaskMention)
                         }
@@ -3017,7 +3150,7 @@ export default function ProjectDetailPage() {
                   </div>
 
                     <aside className="scrollbar-hide border-t border-border/40 lg:border-t-0 lg:overflow-y-auto">
-                      <div className="flex items-center justify-between gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+                      <div className="flex h-12 items-center justify-between gap-2 border-b border-border/40 px-4 sm:px-6">
                         <div className="flex items-center gap-2">
                           <ClipboardList className="size-4 text-primary" />
                           <h3 className="text-sm font-semibold tracking-tight">
@@ -3087,6 +3220,7 @@ export default function ProjectDetailPage() {
                               onValueChange={(v) =>
                                 moveTask(t._id, v as TaskStatusKey)
                               }
+                              disabled={!canChangeTaskStatus(t)}
                             >
                               <SelectTrigger
                                 className={cn(
@@ -3655,6 +3789,8 @@ function SubtaskPanel({
   mentionUsers,
   hashTasks,
   projectMembers,
+  canEdit = true,
+  canManage = true,
   onSave,
 }: {
   task: Task;
@@ -3666,6 +3802,8 @@ function SubtaskPanel({
   }[];
   hashTasks?: HashTask[];
   projectMembers?: UserLite[];
+  canEdit?: boolean;
+  canManage?: boolean;
   onSave: (
     next: Subtask[],
     subtaskMention?: { title: string; mentionIds: string[] }
@@ -3796,14 +3934,15 @@ function SubtaskPanel({
               >
                 <button
                   type="button"
-                  onClick={() => !isEditing && toggle(s._id)}
-                  disabled={isEditing}
+                  onClick={() => canEdit && !isEditing && toggle(s._id)}
+                  disabled={isEditing || !canEdit}
                   aria-label={s.completed ? "Mark incomplete" : "Mark complete"}
                   className={cn(
                     "flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors",
                     s.completed
                       ? "border-emerald-500 bg-emerald-500 text-white"
-                      : "border-muted-foreground/40 hover:border-primary"
+                      : "border-muted-foreground/40 hover:border-primary",
+                    !canEdit && "cursor-not-allowed opacity-60"
                   )}
                 >
                   {s.completed && <Check className="size-3" strokeWidth={3} />}
@@ -3846,34 +3985,55 @@ function SubtaskPanel({
                   </form>
                 ) : (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => startEdit(s)}
-                      className={cn(
-                        "min-w-0 flex-1 break-words text-left text-sm leading-5",
-                        s.completed && "text-muted-foreground line-through"
-                      )}
-                    >
-                      {renderSubtaskTitle(s.title, hashTasks, mentionUsers)}
-                    </button>
-                    <SubtaskAssigneeControl
-                      value={s.assignee ?? null}
-                      members={projectMembers ?? []}
-                      onChange={(user) => {
-                        const next = subtasks.map((x) =>
-                          x._id === s._id ? { ...x, assignee: user } : x
-                        );
-                        onSave(next);
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setPendingRemove(s)}
-                      aria-label="Remove subtask"
-                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                    >
-                      <X className="size-4" />
-                    </button>
+                    {canManage ? (
+                      <button
+                        type="button"
+                        onClick={() => startEdit(s)}
+                        className={cn(
+                          "min-w-0 flex-1 break-words text-left text-sm leading-5",
+                          s.completed && "text-muted-foreground line-through"
+                        )}
+                      >
+                        {renderSubtaskTitle(s.title, hashTasks, mentionUsers)}
+                      </button>
+                    ) : (
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 break-words text-sm leading-5",
+                          s.completed && "text-muted-foreground line-through"
+                        )}
+                      >
+                        {renderSubtaskTitle(s.title, hashTasks, mentionUsers)}
+                      </span>
+                    )}
+                    {canManage ? (
+                      <SubtaskAssigneeControl
+                        value={s.assignee ?? null}
+                        members={projectMembers ?? []}
+                        onChange={(user) => {
+                          const next = subtasks.map((x) =>
+                            x._id === s._id ? { ...x, assignee: user } : x
+                          );
+                          onSave(next);
+                        }}
+                      />
+                    ) : s.assignee ? (
+                      <UserInitialsAvatar
+                        name={s.assignee.name}
+                        role={s.assignee.role}
+                        className="size-7 shrink-0 text-[10px]"
+                      />
+                    ) : null}
+                    {canManage && (
+                      <button
+                        type="button"
+                        onClick={() => setPendingRemove(s)}
+                        aria-label="Remove subtask"
+                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    )}
                   </>
                 )}
               </li>
@@ -3907,7 +4067,7 @@ function SubtaskPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      {adding ? (
+      {canManage && adding ? (
         <form onSubmit={addSubtask} className="flex items-center gap-2">
           <MentionInput
             value={draft}
@@ -3940,7 +4100,7 @@ function SubtaskPanel({
             Cancel
           </Button>
         </form>
-      ) : (
+      ) : canManage ? (
         <button
           type="button"
           onClick={() => setAdding(true)}
@@ -3948,7 +4108,7 @@ function SubtaskPanel({
         >
           <Plus className="size-3.5" /> Add subtask
         </button>
-      )}
+      ) : null}
       </div>
     </div>
   );

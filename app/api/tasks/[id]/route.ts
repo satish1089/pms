@@ -150,12 +150,16 @@ export async function PATCH(
     const isAssignee = (task.assignees ?? []).some(
       (a) => String(a) === session.sub
     );
+    const isReporting = (task.reportingPersons ?? []).some(
+      (a) => String(a) === session.sub
+    );
 
     const requested = Object.keys(parsed.data);
     const collaborativeOnly = requested.every(
       (k) => k === "subtasks" || k === "status"
     );
-    const canCollaborate = isAssignee || isCreator || canManageProject(session);
+    const canCollaborate =
+      isAssignee || isReporting || isCreator || canManageProject(session);
 
     if (collaborativeOnly) {
       if (!canCollaborate) {
