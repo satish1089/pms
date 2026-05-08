@@ -10,6 +10,7 @@ import Task, {
   TASK_PRIORITY_LABELS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
+  TASK_TYPES,
 } from "@/models/Task";
 import User from "@/models/User";
 import Comment from "@/models/Comment";
@@ -37,6 +38,7 @@ const subtaskSchema = z.object({
   _id: z.string().optional(),
   title: z.string().min(1, "Subtask title required"),
   completed: z.boolean().default(false),
+  assignee: z.string().nullable().optional(),
 });
 
 const isoDate = z
@@ -49,6 +51,15 @@ const updateSchema = z.object({
   description: z.string().optional(),
   status: z.enum(TASK_STATUSES).optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
+  type: z.enum(TASK_TYPES).optional(),
+  tags: z
+    .array(z.string().trim().min(1).max(40))
+    .optional()
+    .transform((arr) =>
+      arr === undefined
+        ? undefined
+        : Array.from(new Set(arr.map((s) => s.trim()).filter(Boolean)))
+    ),
   assignedDate: isoDate,
   dueDate: isoDate,
   assignees: z.array(z.string()).optional(),
@@ -92,6 +103,11 @@ export async function GET(
       .populate("createdBy", "name email role")
       .populate("assignees", "name email role")
       .populate("reportingPersons", "name email role")
+      .populate({
+        path: "subtasks.assignee",
+        select: "name email role",
+        strictPopulate: false,
+      })
       .populate({ path: "project", select: "name projectId" })
       .lean();
 
@@ -161,6 +177,8 @@ export async function PATCH(
       update.description = sanitizeRichHtml(parsed.data.description);
     }
     if (parsed.data.priority !== undefined) update.priority = parsed.data.priority;
+    if (parsed.data.type !== undefined) update.type = parsed.data.type;
+    if (parsed.data.tags !== undefined) update.tags = parsed.data.tags;
     if (parsed.data.assignedDate !== undefined)
       update.assignedDate = parsed.data.assignedDate;
     if (parsed.data.dueDate !== undefined) update.dueDate = parsed.data.dueDate;
@@ -177,6 +195,10 @@ export async function PATCH(
           : {}),
         title: s.title,
         completed: s.completed,
+        assignee:
+          s.assignee && isValidId(s.assignee)
+            ? new mongoose.Types.ObjectId(s.assignee)
+            : null,
       }));
     }
 
@@ -217,6 +239,11 @@ export async function PATCH(
       .populate("createdBy", "name email role")
       .populate("assignees", "name email role")
       .populate("reportingPersons", "name email role")
+      .populate({
+        path: "subtasks.assignee",
+        select: "name email role",
+        strictPopulate: false,
+      })
       .populate({ path: "project", select: "name projectId" })
       .lean();
 

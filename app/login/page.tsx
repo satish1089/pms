@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -84,6 +85,22 @@ function LoginForm() {
           className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent"
         />
         <div className="mb-8 space-y-3">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 transition-opacity hover:opacity-90"
+          >
+            <Image
+              src="/logo.png"
+              alt="Projectly"
+              width={36}
+              height={36}
+              priority
+              className="size-9 rounded-lg"
+            />
+            <span className="text-lg font-semibold tracking-tight">
+              Projectly
+            </span>
+          </Link>
           <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
             <Sparkles className="size-3" /> Welcome back
           </div>

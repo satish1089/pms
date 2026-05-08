@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ChevronLeft,
-  ChevronRight,
   Eye,
   EyeOff,
   KeyRound,
@@ -103,7 +101,6 @@ const emptyForm: FormState = {
 type RoleFilter = "all" | UserRole;
 type StatusFilter = "all" | "active" | "inactive";
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 const controlClasses =
   "shadow-none border-border bg-background focus-visible:ring-primary/30 focus-visible:border-primary/60";
@@ -118,8 +115,11 @@ export default function UsersPage() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState<number>(10);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 25;
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(1);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -145,47 +145,71 @@ export default function UsersPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setDebouncedQuery(query.trim());
-      setPage(1);
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [roleFilter, statusFilter, limit]);
+  const fetchUsersPage = useCallback(
+    async (pageNum: number, append: boolean) => {
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(pageNum),
+          limit: String(PAGE_SIZE),
+        });
+        if (debouncedQuery) params.set("q", debouncedQuery);
+        if (roleFilter !== "all") params.set("role", roleFilter);
+        if (statusFilter !== "all") params.set("status", statusFilter);
 
-  const loadUsers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit),
-      });
-      if (debouncedQuery) params.set("q", debouncedQuery);
-      if (roleFilter !== "all") params.set("role", roleFilter);
-      if (statusFilter !== "all") params.set("status", statusFilter);
+        const res = await fetch(`/api/users?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load users");
+        const fetched: User[] = data.users ?? [];
+        setUsers((prev) => (append ? [...prev, ...fetched] : fetched));
+        setTotal(data.total ?? 0);
+        const totalPages = Math.max(
+          1,
+          Math.ceil((data.total ?? 0) / PAGE_SIZE)
+        );
+        setHasMore(pageNum < totalPages);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to load users");
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [debouncedQuery, roleFilter, statusFilter]
+  );
 
-      const res = await fetch(`/api/users?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load users");
-      setUsers(data.users ?? []);
-      setTotal(data.total ?? 0);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load users");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, limit, debouncedQuery, roleFilter, statusFilter]);
+  const loadUsers = useCallback(() => {
+    pageRef.current = 1;
+    return fetchUsersPage(1, false);
+  }, [fetchUsersPage]);
 
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
 
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const rangeStart = total === 0 ? 0 : (page - 1) * limit + 1;
-  const rangeEnd = Math.min(page * limit, total);
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          pageRef.current += 1;
+          fetchUsersPage(pageRef.current, true);
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, fetchUsersPage]);
   const hasFilters =
     Boolean(debouncedQuery) || roleFilter !== "all" || statusFilter !== "all";
 
@@ -285,8 +309,7 @@ export default function UsersPage() {
       if (!res.ok) throw new Error(data.error || "Delete failed");
       toast.success("User deleted");
       setDeleteId(null);
-      if (users.length === 1 && page > 1) setPage(page - 1);
-      else await loadUsers();
+      await loadUsers();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed");
     }
@@ -448,7 +471,7 @@ export default function UsersPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              Array.from({ length: Math.min(limit, 5) }).map((_, i) => (
+              Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i} className="border-border/40 hover:bg-transparent">
                   <TableCell className="px-3 py-2.5">
                     <div className="flex items-center gap-3">
@@ -555,61 +578,18 @@ export default function UsersPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>
-            {total === 0
-              ? "No results"
-              : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
-          </span>
-          <span className="mx-1 hidden text-border sm:inline">·</span>
-          <div className="hidden items-center gap-2 sm:flex">
-            <span>Rows per page</span>
-            <Select
-              value={String(limit)}
-              onValueChange={(v) => setLimit(Number(v))}
-            >
-              <SelectTrigger
-                className={`h-7 w-16 px-2 py-0 text-xs [&_svg]:size-3 ${controlClasses}`}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZE_OPTIONS.map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    {n}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      {users.length > 0 && (
+        <div
+          ref={sentinelRef}
+          className="flex items-center justify-center py-4 text-xs text-muted-foreground"
+        >
+          {loadingMore
+            ? "Loading more…"
+            : hasMore
+            ? "Scroll for more"
+            : `All ${total} users loaded`}
         </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className={`h-7 px-2 text-xs ${controlClasses}`}
-            disabled={loading || page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            <ChevronLeft className="size-3.5" /> Previous
-          </Button>
-          <div className="text-xs text-muted-foreground">
-            Page <span className="font-medium text-foreground">{page}</span> of{" "}
-            <span className="font-medium text-foreground">{totalPages}</span>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className={`h-7 px-2 text-xs ${controlClasses}`}
-            disabled={loading || page >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            Next <ChevronRight className="size-3.5" />
-          </Button>
-        </div>
-      </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">

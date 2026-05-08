@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -114,9 +115,14 @@ function AcceptInviteForm() {
     <div className="flex flex-col justify-center items-center px-4 py-10 sm:px-6 lg:px-12">
       <div className="w-full max-w-md">
         <div className="flex items-center gap-2 mb-10 lg:hidden">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
-            P
-          </div>
+          <Image
+            src="/logo.png"
+            alt="Projectly"
+            width={36}
+            height={36}
+            priority
+            className="size-9 rounded-lg"
+          />
           <span className="text-lg font-semibold tracking-tight">
             Projectly
           </span>

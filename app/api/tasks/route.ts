@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
-import Task, { TASK_STATUSES } from "@/models/Task";
+import Task, { TASK_STATUSES, TASK_TYPES } from "@/models/Task";
 import { TASK_PRIORITIES } from "@/lib/task-priority";
 import { getSession } from "@/lib/auth";
 
@@ -25,6 +25,8 @@ export async function GET(req: NextRequest) {
     const projectId = searchParams.get("project") ?? "";
     const status = searchParams.get("status") ?? "all";
     const priority = searchParams.get("priority") ?? "all";
+    const type = searchParams.get("type") ?? "all";
+    const tag = searchParams.get("tag") ?? "";
     const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
     const limit = Math.min(
       100,
@@ -47,6 +49,14 @@ export async function GET(req: NextRequest) {
 
     if ((TASK_PRIORITIES as readonly string[]).includes(priority)) {
       filter.priority = priority;
+    }
+
+    if ((TASK_TYPES as readonly string[]).includes(type)) {
+      filter.type = type;
+    }
+
+    if (tag.trim()) {
+      filter.tags = tag.trim();
     }
 
     if (q) {

@@ -1,8 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Clock,
   LayoutDashboard,
   Users,
   FolderKanban,
@@ -36,6 +38,7 @@ const mainNav: NavItem[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Projects", url: "/dashboard/projects", icon: FolderKanban },
   { title: "Tasks", url: "/dashboard/tasks", icon: ListChecks },
+  { title: "Logs", url: "/dashboard/logs", icon: Clock },
   { title: "Users", url: "/dashboard/users", icon: Users, adminOnly: true },
   { title: "Settings", url: "/dashboard/settings", icon: Settings },
 ];
@@ -63,9 +66,14 @@ export function AppSidebar({ role }: { role?: UserRole }) {
           href="/dashboard"
           className="flex w-full items-center gap-2.5 transition-opacity hover:opacity-90"
         >
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-bold shadow-sm">
-            P
-          </div>
+          <Image
+            src="/logo.png"
+            alt="Projectly"
+            width={32}
+            height={32}
+            priority
+            className="size-8 shrink-0 rounded-md shadow-sm"
+          />
           <div className="flex flex-col leading-tight group-data-[collapsible=icon]:hidden">
             <span className="text-lg font-semibold tracking-tight">
               Projectly

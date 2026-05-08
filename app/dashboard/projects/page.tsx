@@ -5,8 +5,6 @@ import Link from "next/link";
 import {
   Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   FolderKanban,
   Pencil,
   Plus,
@@ -110,7 +108,6 @@ type Session = {
 
 type StatusFilter = "all" | "active" | "inactive";
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 const controlClasses =
   "shadow-none border-border bg-background focus-visible:ring-primary/30 focus-visible:border-primary/60";
@@ -137,8 +134,11 @@ export default function ProjectsPage() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 25;
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(1);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
@@ -156,16 +156,11 @@ export default function ProjectsPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setDebouncedQuery(query.trim());
-      setPage(1);
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [statusFilter, limit]);
 
   useEffect(() => {
     (async () => {
@@ -177,41 +172,75 @@ export default function ProjectsPage() {
     })();
   }, []);
 
-  const loadProjects = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit),
-      });
-      if (debouncedQuery) params.set("q", debouncedQuery);
-      if (statusFilter !== "all") params.set("status", statusFilter);
+  const fetchProjectsPage = useCallback(
+    async (pageNum: number, append: boolean) => {
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(pageNum),
+          limit: String(PAGE_SIZE),
+        });
+        if (debouncedQuery) params.set("q", debouncedQuery);
+        if (statusFilter !== "all") params.set("status", statusFilter);
 
-      const res = await fetch(`/api/projects?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load projects");
-      const normalized: Project[] = (data.projects ?? []).map(
-        (p: Project & { reportingTo: UserLite[] | UserLite | null }) => ({
-          ...p,
-          reportingTo: Array.isArray(p.reportingTo)
-            ? p.reportingTo
-            : p.reportingTo
-            ? [p.reportingTo as UserLite]
-            : [],
-        })
-      );
-      setProjects(normalized);
-      setTotal(data.total ?? 0);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load projects");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, limit, debouncedQuery, statusFilter]);
+        const res = await fetch(`/api/projects?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load projects");
+        const normalized: Project[] = (data.projects ?? []).map(
+          (p: Project & { reportingTo: UserLite[] | UserLite | null }) => ({
+            ...p,
+            reportingTo: Array.isArray(p.reportingTo)
+              ? p.reportingTo
+              : p.reportingTo
+              ? [p.reportingTo as UserLite]
+              : [],
+          })
+        );
+        setProjects((prev) => (append ? [...prev, ...normalized] : normalized));
+        setTotal(data.total ?? 0);
+        const totalPages = Math.max(
+          1,
+          Math.ceil((data.total ?? 0) / PAGE_SIZE)
+        );
+        setHasMore(pageNum < totalPages);
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load projects"
+        );
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [debouncedQuery, statusFilter]
+  );
+
+  const loadProjects = useCallback(() => {
+    pageRef.current = 1;
+    return fetchProjectsPage(1, false);
+  }, [fetchProjectsPage]);
 
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          pageRef.current += 1;
+          fetchProjectsPage(pageRef.current, true);
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, fetchProjectsPage]);
 
   const patchProjectLocal = useCallback((updated: Project) => {
     const normalized: Project = {
@@ -228,9 +257,6 @@ export default function ProjectsPage() {
     );
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const rangeStart = total === 0 ? 0 : (page - 1) * limit + 1;
-  const rangeEnd = Math.min(page * limit, total);
   const hasFilters = Boolean(debouncedQuery) || statusFilter !== "all";
 
   async function openCreate() {
@@ -331,8 +357,7 @@ export default function ProjectsPage() {
       if (!res.ok) throw new Error(data.error || "Delete failed");
       toast.success("Project deleted");
       setDeleteTarget(null);
-      if (projects.length === 1 && page > 1) setPage(page - 1);
-      else await loadProjects();
+      await loadProjects();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed");
     }
@@ -428,7 +453,7 @@ export default function ProjectsPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              Array.from({ length: Math.min(limit, 5) }).map((_, i) => (
+              Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i} className="border-border/40 hover:bg-transparent">
                   <TableCell className="px-3 py-2.5">
                     <Skeleton className="h-4 w-14" />
@@ -564,61 +589,18 @@ export default function ProjectsPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>
-            {total === 0
-              ? "No results"
-              : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
-          </span>
-          <span className="mx-1 hidden text-border sm:inline">·</span>
-          <div className="hidden items-center gap-2 sm:flex">
-            <span>Rows per page</span>
-            <Select
-              value={String(limit)}
-              onValueChange={(v) => setLimit(Number(v))}
-            >
-              <SelectTrigger
-                className={`h-7 w-16 px-2 py-0 text-xs [&_svg]:size-3 ${controlClasses}`}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZE_OPTIONS.map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    {n}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      {projects.length > 0 && (
+        <div
+          ref={sentinelRef}
+          className="flex items-center justify-center py-4 text-xs text-muted-foreground"
+        >
+          {loadingMore
+            ? "Loading more…"
+            : hasMore
+            ? "Scroll for more"
+            : `All ${total} projects loaded`}
         </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className={`h-7 px-2 text-xs ${controlClasses}`}
-            disabled={loading || page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            <ChevronLeft className="size-3.5" /> Previous
-          </Button>
-          <div className="text-xs text-muted-foreground">
-            Page <span className="font-medium text-foreground">{page}</span> of{" "}
-            <span className="font-medium text-foreground">{totalPages}</span>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className={`h-7 px-2 text-xs ${controlClasses}`}
-            disabled={loading || page >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            Next <ChevronRight className="size-3.5" />
-          </Button>
-        </div>
-      </div>
+      )}
 
       {canEdit && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

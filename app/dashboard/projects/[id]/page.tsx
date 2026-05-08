@@ -17,6 +17,7 @@ import {
   Check,
   ClipboardList,
   Clock,
+  FileText,
   FolderKanban,
   LayoutGrid,
   List as ListIcon,
@@ -73,11 +74,16 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   RoleBadge,
+  StatusBadge,
   TASK_STATUS_STYLES,
+  TASK_TYPE_STYLES,
   TaskStatusBadge,
+  TaskTypeBadge,
   type TaskStatusKey,
+  type TaskTypeKey,
   UserInitialsAvatar,
 } from "@/components/role-status-badge";
+import { TagsInput } from "@/components/tags-input";
 import { cn } from "@/lib/utils";
 import { FieldError, FormAlert, RequiredMark } from "@/components/form-error";
 import {
@@ -92,6 +98,7 @@ import {
 import { MentionInput } from "@/components/mention-input";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { DatePicker } from "@/components/ui/date-picker";
+import { TimeClockPicker } from "@/components/time-clock-picker";
 import {
   PriorityBadge,
   PrioritySelect,
@@ -149,6 +156,7 @@ type Subtask = {
   _id: string;
   title: string;
   completed: boolean;
+  assignee?: UserLite | null;
 };
 
 type TaskPriorityKey = "low" | "medium" | "high" | "urgent";
@@ -160,6 +168,8 @@ type Task = {
   description: string;
   status: TaskStatusKey;
   priority: TaskPriorityKey;
+  type: TaskTypeKey;
+  tags: string[];
   assignedDate: string | null;
   dueDate: string | null;
   createdBy: UserLite | null;
@@ -314,11 +324,12 @@ export default function ProjectDetailPage() {
   const [taskDesc, setTaskDesc] = useState("");
   const [taskStatus, setTaskStatus] = useState<TaskStatusKey>("todo");
   const [taskPriority, setTaskPriority] = useState<TaskPriorityKey>("medium");
+  const [taskType, setTaskType] = useState<TaskTypeKey>("new");
+  const [taskTags, setTaskTags] = useState<string[]>([]);
+  const [projectTags, setProjectTags] = useState<string[]>([]);
   const [taskAssignedDate, setTaskAssignedDate] = useState<Date | null>(null);
   const [taskDueDate, setTaskDueDate] = useState<Date | null>(null);
   const [view, setView] = useState<"list" | "board">("list");
-  const [listPage, setListPage] = useState(1);
-  const LIST_PAGE_SIZE = 10;
   const [taskQuery, setTaskQuery] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState<
     "all" | TaskStatusKey
@@ -327,6 +338,10 @@ export default function ProjectDetailPage() {
     "all" | TaskPriorityKey
   >("all");
   const [taskAssigneeFilter, setTaskAssigneeFilter] = useState<string>("all");
+  const [taskTypeFilter, setTaskTypeFilter] = useState<"all" | TaskTypeKey>(
+    "all"
+  );
+  const [taskTagFilter, setTaskTagFilter] = useState<string>("all");
   const [tab, setTab] = useState<string>("tasks");
 
   type LogEntry = {
@@ -357,11 +372,6 @@ export default function ProjectDetailPage() {
   const [logNote, setLogNote] = useState<string>("");
   const [logUserFilter, setLogUserFilter] = useState<string>("all");
   const [logDialogOpen, setLogDialogOpen] = useState(false);
-  const HOUR_OPTIONS = useMemo(
-    () => Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0")),
-    [],
-  );
-  const MIN_OPTIONS = useMemo(() => ["00", "15", "30", "45"], []);
   const computedLogHours = useMemo(() => {
     const start = parseInt(logStartHour, 10) * 60 + parseInt(logStartMin, 10);
     const end = parseInt(logEndHour, 10) * 60 + parseInt(logEndMin, 10);
@@ -462,6 +472,11 @@ export default function ProjectDetailPage() {
   const canEdit =
     session?.role === "admin" || session?.role === "project_manager";
   const isAdmin = session?.role === "admin";
+  const sessionUserId = session?._id;
+  const isTaskCreator = (t: Task) =>
+    !!sessionUserId && String(t.createdBy?._id ?? "") === sessionUserId;
+  const canEditTask = (t: Task) => canEdit || isTaskCreator(t);
+  const canDeleteTask = (t: Task) => canEdit || isTaskCreator(t);
 
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
   const [deletingTask, setDeletingTask] = useState(false);
@@ -495,6 +510,9 @@ export default function ProjectDetailPage() {
         return false;
       if (taskPriorityFilter !== "all" && t.priority !== taskPriorityFilter)
         return false;
+      if (taskTypeFilter !== "all" && t.type !== taskTypeFilter) return false;
+      if (taskTagFilter !== "all" && !(t.tags ?? []).includes(taskTagFilter))
+        return false;
       if (taskAssigneeFilter !== "all") {
         if (taskAssigneeFilter === "__unassigned") {
           if ((t.assignees?.length ?? 0) > 0) return false;
@@ -506,17 +524,24 @@ export default function ProjectDetailPage() {
       }
       return true;
     });
-  }, [tasks, taskQuery, taskStatusFilter, taskPriorityFilter, taskAssigneeFilter]);
+  }, [
+    tasks,
+    taskQuery,
+    taskStatusFilter,
+    taskPriorityFilter,
+    taskAssigneeFilter,
+    taskTypeFilter,
+    taskTagFilter,
+  ]);
 
   const hasTaskFilters =
     Boolean(taskQuery.trim()) ||
     taskStatusFilter !== "all" ||
     taskPriorityFilter !== "all" ||
-    taskAssigneeFilter !== "all";
+    taskAssigneeFilter !== "all" ||
+    taskTypeFilter !== "all" ||
+    taskTagFilter !== "all";
 
-  useEffect(() => {
-    setListPage(1);
-  }, [taskQuery, taskStatusFilter, taskPriorityFilter, taskAssigneeFilter]);
 
   type ProjectFile = MediaItem & {
     id: string;
@@ -661,6 +686,76 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function addReporting(userId: string) {
+    if (!project) return;
+    const existing = (project.reportingTo ?? []).map((a) => a._id);
+    if (existing.includes(userId)) return;
+    try {
+      const res = await fetch(`/api/projects/${project._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportingTo: [...existing, userId] }),
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.error || "Failed to add reporting person");
+      setProject(data.project);
+      toast.success("Reporting person added");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to add reporting person"
+      );
+    }
+  }
+
+  async function removeReporting(userId: string) {
+    if (!project) return;
+    const next = (project.reportingTo ?? [])
+      .filter((a) => a._id !== userId)
+      .map((a) => a._id);
+    try {
+      const res = await fetch(`/api/projects/${project._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportingTo: next }),
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.error || "Failed to remove reporting person");
+      setProject(data.project);
+      toast.success("Reporting person removed");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to remove reporting person"
+      );
+    }
+  }
+
+  async function patchProjectField(
+    payload: Partial<{
+      name: string;
+      status: "active" | "inactive";
+      reportingTo: string[];
+    }>,
+    label: string
+  ) {
+    if (!project) return;
+    try {
+      const res = await fetch(`/api/projects/${project._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Failed to update ${label}`);
+      setProject(data.project);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : `Failed to update ${label}`
+      );
+    }
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -715,6 +810,17 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (project) loadTasks();
   }, [project, loadTasks]);
+
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${id}/tags`);
+        const data = await res.json();
+        if (res.ok) setProjectTags(data.tags ?? []);
+      } catch {}
+    })();
+  }, [id, tasks]);
 
   const editHandledRef = useRef(false);
   useEffect(() => {
@@ -991,6 +1097,72 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function updateTaskReporting(
+    taskId: string,
+    nextReporting: UserLite[]
+  ) {
+    const prev = tasks;
+    setTasks((ts) =>
+      ts.map((t) =>
+        t._id === taskId ? { ...t, reportingPersons: nextReporting } : t
+      )
+    );
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reportingPersons: nextReporting.map((u) => u._id),
+        }),
+      });
+      if (!res.ok) {
+        setTasks(prev);
+        const data = await res.json();
+        toast.error(data.error || "Failed to update reporting");
+      }
+    } catch (err) {
+      setTasks(prev);
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update reporting"
+      );
+    }
+  }
+
+  async function patchTaskField(
+    taskId: string,
+    patch: Partial<{
+      priority: TaskPriorityKey;
+      assignedDate: string | null;
+      dueDate: string | null;
+      type: TaskTypeKey;
+      tags: string[];
+    }>,
+    optimistic: Partial<Task>,
+    label: string
+  ) {
+    const prev = tasks;
+    setTasks((ts) =>
+      ts.map((t) => (t._id === taskId ? { ...t, ...optimistic } : t))
+    );
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        setTasks(prev);
+        const data = await res.json();
+        toast.error(data.error || `Failed to update ${label}`);
+      }
+    } catch (err) {
+      setTasks(prev);
+      toast.error(
+        err instanceof Error ? err.message : `Failed to update ${label}`
+      );
+    }
+  }
+
   async function moveTask(taskId: string, newStatus: TaskStatusKey) {
     const existing = tasks.find((t) => t._id === taskId);
     if (!existing || existing.status === newStatus) return;
@@ -1044,6 +1216,7 @@ export default function ProjectDetailPage() {
             _id: s._id.startsWith("tmp-") ? undefined : s._id,
             title: s.title,
             completed: s.completed,
+            assignee: s.assignee?._id ?? null,
           })),
           ...(subtaskMention && subtaskMention.mentionIds.length > 0
             ? { subtaskMention }
@@ -1074,6 +1247,8 @@ export default function ProjectDetailPage() {
     setTaskDesc("");
     setTaskStatus("todo");
     setTaskPriority("medium");
+    setTaskType("new");
+    setTaskTags([]);
     setTaskAssignedDate(new Date());
     setTaskDueDate(null);
     setTaskAssignees([]);
@@ -1089,6 +1264,8 @@ export default function ProjectDetailPage() {
     setTaskDesc(t.description ?? "");
     setTaskStatus(t.status);
     setTaskPriority(t.priority ?? "medium");
+    setTaskType(t.type ?? "new");
+    setTaskTags(t.tags ?? []);
     setTaskAssignedDate(t.assignedDate ? new Date(t.assignedDate) : null);
     setTaskDueDate(t.dueDate ? new Date(t.dueDate) : null);
     setTaskAssignees(t.assignees);
@@ -1124,6 +1301,8 @@ export default function ProjectDetailPage() {
           description: taskDesc,
           status: taskStatus,
           priority: taskPriority,
+          type: taskType,
+          tags: taskTags,
           assignedDate: taskAssignedDate
             ? taskAssignedDate.toISOString()
             : null,
@@ -1187,10 +1366,10 @@ export default function ProjectDetailPage() {
         <Tabs
           value={tab}
           onValueChange={(v) => setTab(v as typeof tab)}
-          className="flex min-w-0 flex-1 flex-col lg:min-h-0"
+          className="flex min-w-0 flex-1 flex-col gap-0 lg:min-h-0"
         >
           <div className="relative">
-            <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b-2 border-border/60 bg-transparent px-2 py-0 shadow-none sm:px-3">
+            <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b-2 border-border/60 bg-transparent pr-3 py-0 shadow-none sm:pr-3">
               <TabsTrigger
                 value="overview"
                 className={cn(chromeTabClasses, TAB_OVERVIEW)}
@@ -1277,150 +1456,52 @@ export default function ProjectDetailPage() {
 
           <TabsContent
             value="overview"
-            className="mt-2 flex-1 lg:min-h-0 lg:overflow-y-auto"
+            className="flex-1 lg:min-h-0 lg:overflow-hidden"
           >
-            <div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-border/40 px-4 py-2 text-sm sm:px-6">
-                <span>
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    ID
-                  </span>{" "}
-                  <span className="font-mono text-xs">{project.projectId}</span>
-                </span>
-                <span className="text-border">|</span>
-                <span>
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Name
-                  </span>{" "}
-                  <span className="font-semibold">{project.name}</span>
-                </span>
-                <span className="text-border">|</span>
-                <span className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Reporting to
-                  </span>
-                  {project.reportingTo && project.reportingTo.length > 0 ? (
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      {project.reportingTo.map((u) => (
-                        <MinimalPerson key={u._id} user={u} />
-                      ))}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
-                  )}
-                </span>
-                <span className="text-border">|</span>
-                <span className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Assignees
-                  </span>
-                  <span className="rounded-full border bg-background px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
-                    {project.assignees.length}
-                  </span>
-                  <AssigneeAvatarRow
-                    users={project.assignees}
-                    canEdit={canEdit}
-                    existingIds={[
-                      ...project.assignees.map((u) => u._id),
-                      ...(project.reportingTo ?? []).map((u) => u._id),
-                    ]}
-                    onAdd={addAssignee}
-                    onRemove={removeAssignee}
-                  />
-                </span>
-                <span className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground">
-                  <span>Created {formatDate(project.createdAt)}</span>
-                  <span className="text-border">·</span>
-                  <span>Updated {formatDate(project.updatedAt)}</span>
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2 sm:px-6">
-                <MessageSquare className="size-3.5 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">Comments</h2>
-                <span className="rounded-full border bg-background px-1.5 py-0 text-[11px] font-medium text-muted-foreground">
-                  {projCommentsLoading ? "…" : projComments.length}
-                </span>
-              </div>
-
-              {projCommentsLoading ? (
-                <div className="space-y-3 p-3 sm:px-6">
-                  {Array.from({ length: 2 }).map((_, i) => (
-                    <div key={i} className="flex items-start gap-2.5">
-                      <Skeleton className="size-7 rounded-full" />
-                      <div className="flex-1 space-y-1.5">
-                        <Skeleton className="h-3 w-40" />
-                        <Skeleton className="h-3 w-full" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                (() => {
-                  const sorted = [...projComments].sort(
-                    (a, b) =>
-                      new Date(b.createdAt ?? 0).getTime() -
-                      new Date(a.createdAt ?? 0).getTime()
-                  );
-                  const hasDesc =
-                    !!project.description && project.description.trim() !== "";
-                  const renderComment = (c: (typeof sorted)[number]) => (
-                    <li
-                      key={c._id}
-                      className="flex items-start gap-2 px-4 py-2 sm:px-6"
-                    >
-                      <UserInitialsAvatar
-                        name={c.author?.name ?? "?"}
-                        role={c.author?.role}
-                        className="size-6 text-[9px]"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {c.author?.name ?? "Unknown"}
-                          </span>
-                          {c.author?.role && (
-                            <RoleBadge role={c.author.role} />
-                          )}
-                          <span>· {formatDate(c.createdAt)}</span>
-                        </div>
-                        <div className="mt-1">
-                          <RichTextViewer html={c.body} />
-                        </div>
-                      </div>
-                    </li>
-                  );
-
-                  return (
-                    <ul className="divide-y divide-border/40">
-                      {hasDesc && (
-                        <li className="flex items-start gap-2 bg-primary/5 px-4 py-2 sm:px-6">
-                          <UserInitialsAvatar
-                            name={project.createdBy?.name ?? "P"}
-                            role={project.createdBy?.role}
-                            className="size-6 text-[9px]"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                              <span className="font-medium text-foreground">
-                                {project.createdBy?.name ?? "Project"}
-                              </span>
-                              {project.createdBy?.role && (
-                                <RoleBadge role={project.createdBy.role} />
-                              )}
-                              <span className="rounded-full bg-primary/15 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                                Description
-                              </span>
-                              <span>· {formatDate(project.createdAt)}</span>
-                            </div>
-                            <div className="mt-1">
-                              <RichTextViewer html={project.description ?? ""} />
-                            </div>
-                          </div>
-                        </li>
+            <div className="flex flex-col lg:h-full lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="scrollbar-hide min-w-0 lg:overflow-y-auto lg:border-r lg:border-border/40">
+                <div>
+                  <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+                    <FileText className="size-4 text-primary" />
+                    <h3 className="text-sm font-semibold tracking-tight">
+                      Description
+                    </h3>
+                  </div>
+                  <div className="px-4 py-3 sm:px-6">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      {project.createdBy && (
+                        <span className="font-medium text-foreground">
+                          {project.createdBy.name}
+                        </span>
                       )}
+                      <span>· {formatDate(project.createdAt)}</span>
+                    </div>
+                    <div className="mt-1">
+                      {project.description && project.description.trim() !== "" ? (
+                        <RichTextViewer html={project.description} />
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          No description.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
 
-                      <li className="px-4 py-2 sm:px-6">
+                <div>
+                  <div className="flex items-center justify-between border-b border-border/40 px-4 py-2.5 sm:px-6">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="size-4 text-primary" />
+                      <h3 className="text-sm font-semibold tracking-tight">
+                        Comments
+                      </h3>
+                      <span className="rounded-full border bg-background px-1.5 py-0 text-[11px] font-medium text-muted-foreground">
+                        {projCommentsLoading ? "…" : projComments.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="border-b border-border/40 px-4 py-2 sm:px-6">
                     {!projComposerOpen ? (
                       <button
                         type="button"
@@ -1469,29 +1550,191 @@ export default function ProjectDetailPage() {
                         </div>
                       </form>
                     )}
-                  </li>
+                  </div>
 
-                      {sorted.length === 0 && !hasDesc ? (
-                        <li className="flex flex-col items-center justify-center gap-0.5 p-3 text-center">
+                  {projCommentsLoading ? (
+                    <div className="space-y-3 p-3 sm:px-6">
+                      {Array.from({ length: 2 }).map((_, i) => (
+                        <div key={i} className="flex items-start gap-2.5">
+                          <Skeleton className="size-7 rounded-full" />
+                          <div className="flex-1 space-y-1.5">
+                            <Skeleton className="h-3 w-40" />
+                            <Skeleton className="h-3 w-full" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    (() => {
+                      const sorted = [...projComments].sort(
+                        (a, b) =>
+                          new Date(b.createdAt ?? 0).getTime() -
+                          new Date(a.createdAt ?? 0).getTime()
+                      );
+                      const renderComment = (c: (typeof sorted)[number]) => (
+                        <li
+                          key={c._id}
+                          className="flex items-start gap-2 px-4 py-2 sm:px-6"
+                        >
+                          <UserInitialsAvatar
+                            name={c.author?.name ?? "?"}
+                            role={c.author?.role}
+                            className="size-6 text-[9px]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                              <span className="font-medium text-foreground">
+                                {c.author?.name ?? "Unknown"}
+                              </span>
+                              <span>· {formatDate(c.createdAt)}</span>
+                            </div>
+                            <div className="mt-1">
+                              <RichTextViewer html={c.body} />
+                            </div>
+                          </div>
+                        </li>
+                      );
+
+                      return sorted.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center gap-0.5 p-3 text-center">
                           <MessageSquare className="size-4 text-muted-foreground" />
                           <p className="text-sm font-medium">No posts yet</p>
                           <p className="text-xs text-muted-foreground">
                             Share updates, context, or questions for the whole project.
                           </p>
-                        </li>
+                        </div>
                       ) : (
-                        sorted.map((c) => renderComment(c))
-                      )}
-                    </ul>
-                  );
-                })()
-              )}
+                        <ul className="divide-y divide-border/40">
+                          {sorted.map((c) => renderComment(c))}
+                        </ul>
+                      );
+                    })()
+                  )}
+                </div>
+              </div>
+
+              <aside className="scrollbar-hide border-t border-border/40 lg:border-t-0 lg:overflow-y-auto">
+                <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+                  <FolderKanban className="size-4 text-primary" />
+                  <h3 className="text-sm font-semibold tracking-tight">
+                    Project info
+                  </h3>
+                </div>
+                <div className="space-y-3 px-4 py-3 text-sm sm:px-6">
+                  <InfoField label="ID">
+                    <span className="font-mono text-sm font-semibold">
+                      {project.projectId}
+                    </span>
+                  </InfoField>
+
+                  <InfoField label="Name">
+                    {canEdit ? (
+                      <ProjectNameInline
+                        value={project.name}
+                        onSave={(name) =>
+                          patchProjectField({ name }, "name")
+                        }
+                      />
+                    ) : (
+                      <span className="text-sm font-medium">
+                        {project.name}
+                      </span>
+                    )}
+                  </InfoField>
+
+                  <InfoField label="Status">
+                    {canEdit ? (
+                      <Select
+                        value={project.status ?? "active"}
+                        onValueChange={(v) =>
+                          patchProjectField(
+                            { status: v as "active" | "inactive" },
+                            "status"
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          className={cn(
+                            "h-9 w-full gap-1.5 px-3 text-sm font-medium shadow-none",
+                            project.status === "active"
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                              : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">
+                            <span className="flex items-center gap-2">
+                              <span className="size-1.5 rounded-full bg-emerald-500" />
+                              Active
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="inactive">
+                            <span className="flex items-center gap-2">
+                              <span className="size-1.5 rounded-full bg-muted-foreground" />
+                              Inactive
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <StatusBadge status={project.status ?? "active"} />
+                    )}
+                  </InfoField>
+
+                  <InfoField label="Reporting to">
+                    <AssigneeAvatarRow
+                      users={project.reportingTo ?? []}
+                      canEdit={canEdit}
+                      existingIds={[
+                        ...project.assignees.map((u) => u._id),
+                        ...(project.reportingTo ?? []).map((u) => u._id),
+                      ]}
+                      onAdd={addReporting}
+                      onRemove={removeReporting}
+                    />
+                  </InfoField>
+
+                  <InfoField label="Assignees">
+                    <AssigneeAvatarRow
+                      users={project.assignees}
+                      canEdit={canEdit}
+                      existingIds={[
+                        ...project.assignees.map((u) => u._id),
+                        ...(project.reportingTo ?? []).map((u) => u._id),
+                      ]}
+                      onAdd={addAssignee}
+                      onRemove={removeAssignee}
+                    />
+                  </InfoField>
+
+                  <div className="border-t border-border/40 pt-3 text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>Created by</span>
+                      <span className="font-medium text-foreground">
+                        {project.createdBy?.name ?? "—"}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <span>Created</span>
+                      <span>{formatDate(project.createdAt)}</span>
+                    </div>
+                    {project.updatedAt && (
+                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                        <span>Updated</span>
+                        <span>{formatDate(project.updatedAt)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </aside>
             </div>
           </TabsContent>
 
           <TabsContent
             value="tasks"
-            className="mt-2 flex flex-1 flex-col lg:min-h-0"
+            className="flex flex-1 flex-col lg:min-h-0"
           >
             <div className="flex flex-1 flex-col lg:min-h-0">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-2 sm:px-6 shrink-0">
@@ -1529,11 +1772,9 @@ export default function ProjectDetailPage() {
                 <ListIcon className="size-3.5" /> List
               </button>
             </div>
-            {canEdit && (
-              <Button size="sm" onClick={openCreateTask}>
-                <Plus className="mr-2 size-4" /> Add task
-              </Button>
-            )}
+            <Button size="sm" onClick={openCreateTask}>
+              <Plus className="mr-2 size-4" /> Add task
+            </Button>
           </div>
         </div>
 
@@ -1609,6 +1850,39 @@ export default function ProjectDetailPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Select
+              value={taskTypeFilter}
+              onValueChange={(v) =>
+                setTaskTypeFilter(v as "all" | TaskTypeKey)
+              }
+            >
+              <SelectTrigger size="sm" className="h-8 w-32 shadow-none">
+                <SelectValue placeholder="All types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                {(Object.keys(TASK_TYPE_STYLES) as TaskTypeKey[]).map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {TASK_TYPE_STYLES[k].label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {projectTags.length > 0 && (
+              <Select value={taskTagFilter} onValueChange={setTaskTagFilter}>
+                <SelectTrigger size="sm" className="h-8 w-36 shadow-none">
+                  <SelectValue placeholder="All tags" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All tags</SelectItem>
+                  {projectTags.map((tag) => (
+                    <SelectItem key={tag} value={tag}>
+                      {tag}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {hasTaskFilters && (
               <Button
                 variant="ghost"
@@ -1618,6 +1892,8 @@ export default function ProjectDetailPage() {
                   setTaskStatusFilter("all");
                   setTaskPriorityFilter("all");
                   setTaskAssigneeFilter("all");
+                  setTaskTypeFilter("all");
+                  setTaskTagFilter("all");
                 }}
                 className="h-8 text-muted-foreground hover:text-foreground"
               >
@@ -1696,15 +1972,13 @@ export default function ProjectDetailPage() {
             <p className="max-w-xs text-xs text-muted-foreground">
               Create the first task to start tracking work for this project.
             </p>
-            {canEdit && (
-              <Button
-                size="sm"
-                className="mt-2"
-                onClick={openCreateTask}
-              >
-                <Plus className="mr-1 size-3.5" /> Add task
-              </Button>
-            )}
+            <Button
+              size="sm"
+              className="mt-2"
+              onClick={openCreateTask}
+            >
+              <Plus className="mr-1 size-3.5" /> Add task
+            </Button>
           </div>
         ) : filteredTasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 p-10 text-center">
@@ -1724,6 +1998,8 @@ export default function ProjectDetailPage() {
                 setTaskStatusFilter("all");
                 setTaskPriorityFilter("all");
                 setTaskAssigneeFilter("all");
+                setTaskTypeFilter("all");
+                setTaskTagFilter("all");
               }}
             >
               <X className="mr-1 size-3.5" /> Clear filters
@@ -1782,8 +2058,8 @@ export default function ProjectDetailPage() {
                             task={t}
                             dragging={draggingId === t._id}
                             projectMembers={project.assignees}
-                            canEdit={canEdit}
-                            canDelete={isAdmin}
+                            canEdit={canEditTask(t)}
+                            canDelete={canDeleteTask(t)}
                             onOpen={() => openTaskTab(t._id)}
                             onEdit={() => openEditTask(t)}
                             onDelete={() => setPendingDeleteTask(t)}
@@ -1814,6 +2090,7 @@ export default function ProjectDetailPage() {
                   <TableHead className="h-8 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Title</TableHead>
                   <TableHead className="h-8 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status</TableHead>
                   <TableHead className="h-8 w-28 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Priority</TableHead>
+                  <TableHead className="h-8 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Type</TableHead>
                   <TableHead className="h-8 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Assigned</TableHead>
                   <TableHead className="h-8 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Due</TableHead>
                   <TableHead className="h-8 w-40 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Assignees</TableHead>
@@ -1823,12 +2100,7 @@ export default function ProjectDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredTasks
-                  .slice(
-                    (listPage - 1) * LIST_PAGE_SIZE,
-                    listPage * LIST_PAGE_SIZE
-                  )
-                  .map((t) => (
+                {filteredTasks.map((t) => (
                   <TableRow
                     key={t._id}
                     className={cn(
@@ -1890,7 +2162,7 @@ export default function ProjectDetailPage() {
                             <Link2 className="size-3.5" />
                           )}
                         </button>
-                        {canEdit && (
+                        {canEditTask(t) && (
                           <button
                             type="button"
                             aria-label="Edit task"
@@ -1904,7 +2176,7 @@ export default function ProjectDetailPage() {
                             <Pencil className="size-3.5" />
                           </button>
                         )}
-                        {isAdmin && (
+                        {canDeleteTask(t) && (
                           <button
                             type="button"
                             aria-label="Delete task"
@@ -1919,6 +2191,23 @@ export default function ProjectDetailPage() {
                           </button>
                         )}
                       </div>
+                      {(t.tags ?? []).length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(t.tags ?? []).slice(0, 3).map((tag) => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center rounded-full border bg-muted/40 px-1.5 py-0 text-[10px] font-medium text-muted-foreground"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                          {(t.tags ?? []).length > 3 && (
+                            <span className="inline-flex items-center rounded-full border bg-muted/40 px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                              +{(t.tags ?? []).length - 3}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell
                       className="px-3 py-1.5"
@@ -1959,6 +2248,9 @@ export default function ProjectDetailPage() {
                     <TableCell className="px-3 py-1.5">
                       <PriorityBadge priority={t.priority} />
                     </TableCell>
+                    <TableCell className="px-3 py-1.5">
+                      <TaskTypeBadge type={t.type ?? "new"} />
+                    </TableCell>
                     <TableCell className="px-3 py-1.5 text-xs text-muted-foreground">
                       {formatShortDate(t.assignedDate)}
                     </TableCell>
@@ -1976,7 +2268,7 @@ export default function ProjectDetailPage() {
                         selected={t.assignees}
                         options={project.assignees}
                         onChange={(next) => updateTaskAssignees(t._id, next)}
-                        canEdit={canEdit}
+                        canEdit={canEditTask(t)}
                       />
                     </TableCell>
                     <TableCell className="px-3 py-1.5">
@@ -1988,6 +2280,9 @@ export default function ProjectDetailPage() {
                     </TableCell>
                     <TableCell className="px-3 py-1.5 text-sm text-muted-foreground">
                       {t.createdBy?.name ?? "—"}
+                      {isTaskCreator(t) && (
+                        <span className="ml-1 text-xs text-primary">(you)</span>
+                      )}
                     </TableCell>
                     <TableCell className="px-3 py-1.5 text-xs text-muted-foreground whitespace-nowrap">
                       {formatShortDate(t.createdAt)}
@@ -1999,12 +2294,7 @@ export default function ProjectDetailPage() {
             </div>
 
             <ul className="divide-y divide-border/40 md:hidden">
-              {filteredTasks
-                .slice(
-                  (listPage - 1) * LIST_PAGE_SIZE,
-                  listPage * LIST_PAGE_SIZE
-                )
-                .map((t) => (
+              {filteredTasks.map((t) => (
                   <li
                     key={t._id}
                     className={cn("p-3", STATUS_ROW_BG[t.status])}
@@ -2041,48 +2331,6 @@ export default function ProjectDetailPage() {
                 ))}
             </ul>
 
-            {filteredTasks.length > LIST_PAGE_SIZE && (
-              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/40 px-4 py-3 sm:px-6">
-                <span className="text-xs text-muted-foreground">
-                  Showing {(listPage - 1) * LIST_PAGE_SIZE + 1}-
-                  {Math.min(listPage * LIST_PAGE_SIZE, filteredTasks.length)} of{" "}
-                  {filteredTasks.length}
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
-                    disabled={listPage === 1}
-                  >
-                    Prev
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Page {listPage} /{" "}
-                    {Math.max(1, Math.ceil(filteredTasks.length / LIST_PAGE_SIZE))}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setListPage((p) =>
-                        Math.min(
-                          Math.ceil(filteredTasks.length / LIST_PAGE_SIZE),
-                          p + 1
-                        )
-                      )
-                    }
-                    disabled={
-                      listPage >= Math.ceil(filteredTasks.length / LIST_PAGE_SIZE)
-                    }
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
           </div>
         )}
             </div>
@@ -2090,7 +2338,7 @@ export default function ProjectDetailPage() {
 
           <TabsContent
             value="files"
-            className="mt-2 flex-1 lg:min-h-0 lg:overflow-y-auto"
+            className="flex-1 lg:min-h-0 lg:overflow-y-auto"
           >
             <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2 sm:px-6">
               <Paperclip className="size-3.5 text-muted-foreground" />
@@ -2150,7 +2398,7 @@ export default function ProjectDetailPage() {
 
           <TabsContent
             value="logs"
-            className="mt-2 flex flex-1 flex-col lg:min-h-0"
+            className="flex flex-1 flex-col lg:min-h-0"
           >
             {(() => {
               const userOptions = isAdmin
@@ -2408,7 +2656,7 @@ export default function ProjectDetailPage() {
                         <div className="grid gap-1.5">
                           <Label>Task</Label>
                           <Select value={logTaskId} onValueChange={setLogTaskId}>
-                            <SelectTrigger className="h-9 w-full">
+                            <SelectTrigger className="h-9 w-full shadow-none">
                               <SelectValue placeholder="Pick task" />
                             </SelectTrigger>
                             <SelectContent>
@@ -2432,63 +2680,27 @@ export default function ProjectDetailPage() {
                           </div>
                           <div className="grid gap-1.5">
                             <Label>Start</Label>
-                            <div className="flex h-9 w-full items-center overflow-hidden rounded-md border bg-background">
-                              <Select value={logStartHour} onValueChange={setLogStartHour}>
-                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {HOUR_OPTIONS.map((h) => (
-                                    <SelectItem key={h} value={h}>
-                                      {h}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <span className="text-muted-foreground">:</span>
-                              <Select value={logStartMin} onValueChange={setLogStartMin}>
-                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {MIN_OPTIONS.map((m) => (
-                                    <SelectItem key={m} value={m}>
-                                      {m}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
+                            <TimeClockPicker
+                              ariaLabel="Start time"
+                              value={`${logStartHour}:${logStartMin}`}
+                              onChange={(v) => {
+                                const [h, m] = v.split(":");
+                                setLogStartHour(h);
+                                setLogStartMin(m);
+                              }}
+                            />
                           </div>
                           <div className="grid gap-1.5">
                             <Label>End</Label>
-                            <div className="flex h-9 w-full items-center overflow-hidden rounded-md border bg-background">
-                              <Select value={logEndHour} onValueChange={setLogEndHour}>
-                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {HOUR_OPTIONS.map((h) => (
-                                    <SelectItem key={h} value={h}>
-                                      {h}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <span className="text-muted-foreground">:</span>
-                              <Select value={logEndMin} onValueChange={setLogEndMin}>
-                                <SelectTrigger className="h-9 flex-1 justify-center rounded-none border-0 font-mono text-sm shadow-none focus:ring-0 [&>svg]:hidden">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {MIN_OPTIONS.map((m) => (
-                                    <SelectItem key={m} value={m}>
-                                      {m}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
+                            <TimeClockPicker
+                              ariaLabel="End time"
+                              value={`${logEndHour}:${logEndMin}`}
+                              onChange={(v) => {
+                                const [h, m] = v.split(":");
+                                setLogEndHour(h);
+                                setLogEndMin(m);
+                              }}
+                            />
                           </div>
                           <div className="grid gap-1.5">
                             <Label>Duration</Label>
@@ -2508,7 +2720,7 @@ export default function ProjectDetailPage() {
                           <Label>Note</Label>
                           <Textarea
                             rows={4}
-                            className="w-full resize-y"
+                            className="w-full resize-y shadow-none"
                             value={logNote}
                             onChange={(e) => setLogNote(e.target.value)}
                             placeholder="What did you work on?"
@@ -2583,7 +2795,7 @@ export default function ProjectDetailPage() {
             <TabsContent
               key={tid}
               value={`task:${tid}`}
-              className="mt-2 flex-1 lg:min-h-0 lg:overflow-y-auto"
+              className="flex-1 lg:min-h-0 lg:overflow-y-auto"
             >
               <TaskTabSkeleton />
             </TabsContent>
@@ -2596,314 +2808,513 @@ export default function ProjectDetailPage() {
               <TabsContent
                 key={t._id}
                 value={`task:${t._id}`}
-                className="mt-2 flex-1 lg:min-h-0 lg:overflow-y-auto"
+                className="flex-1 lg:min-h-0 lg:overflow-hidden"
               >
-                <div>
-                  <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2 sm:px-6">
-                    <MessageSquare className="size-3.5 text-muted-foreground" />
-                    {t.taskId ? (
-                      <span className="font-mono text-sm text-muted-foreground">
-                        {t.taskId}
-                      </span>
-                    ) : null}
-                    <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
-                      {t.title}
-                    </h2>
-                    <button
-                      type="button"
-                      aria-label="Copy task link"
-                      title={
-                        copiedTaskId === t._id ? "Copied!" : "Copy task link"
-                      }
-                      onClick={async () => {
-                        const url = `${window.location.origin}/dashboard/projects/${project._id}?task=${t._id}`;
-                        try {
-                          await navigator.clipboard.writeText(url);
-                          setCopiedTaskId(t._id);
-                          toast.success("Task link copied");
-                          setTimeout(() => {
-                            setCopiedTaskId((c) => (c === t._id ? null : c));
-                          }, 1500);
-                        } catch {
-                          toast.error("Failed to copy");
-                        }
-                      }}
-                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      {copiedTaskId === t._id ? (
-                        <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-                      ) : (
-                        <Link2 className="size-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => closeTaskTab(t._id)}
-                      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="size-3.5" />
-                      Close tab
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-1.5 sm:px-6">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Status
-                      </span>
-                      <Select
-                        value={t.status}
-                        onValueChange={(v) =>
-                          moveTask(t._id, v as TaskStatusKey)
-                        }
-                      >
-                        <SelectTrigger
-                          size="sm"
-                          className={cn(
-                            "h-7 w-[140px] gap-1.5 border-transparent px-2 text-xs font-medium shadow-none hover:border-border",
-                            TASK_STATUS_STYLES[t.status].cls
-                          )}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {BOARD_COLUMNS.map((s) => (
-                            <SelectItem key={s} value={s}>
-                              <span className="flex items-center gap-2">
-                                <span
-                                  className={cn(
-                                    "size-1.5 rounded-full",
-                                    TASK_STATUS_STYLES[s].dot
-                                  )}
-                                />
-                                {TASK_STATUS_STYLES[s].label}
-                              </span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Assignees
-                      </span>
-                      <TaskAssigneeRow
-                        selected={t.assignees}
-                        options={project.assignees}
-                        onChange={(next) =>
-                          updateTaskAssignees(t._id, next)
-                        }
-                        canEdit={canEdit}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-2 border-b border-border/40 bg-primary/5 px-4 py-2 sm:px-6">
-                    {/* {t.createdBy ? (
-                      <UserInitialsAvatar
-                        name={t.createdBy.name}
-                        role={t.createdBy.role}
-                        className="size-6 text-[9px]"
-                      />
-                    ) : (
-                      <UserInitialsAvatar name="T" className="size-6 text-[9px]" />
-                    )} */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                        {t.createdBy && (
-                          <>
+                <div className="flex flex-col lg:h-full lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
+                  <div className="scrollbar-hide min-w-0 lg:overflow-y-auto lg:border-r lg:border-border/40">
+                    <div>
+                      <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+                        <FileText className="size-4 text-primary" />
+                        <h3 className="text-sm font-semibold tracking-tight">
+                          Description
+                        </h3>
+                      </div>
+                      <div className="px-4 py-3 sm:px-6">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                          {t.createdBy && (
                             <span className="font-medium text-foreground">
                               {t.createdBy.name}
                             </span>
-                            {t.createdBy.role && (
-                              <RoleBadge role={t.createdBy.role} />
-                            )}
-                          </>
-                        )}
-                        <span className="rounded-full bg-primary/15 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                          Description
-                        </span>
-                        <span>· {formatDate(t.createdAt)}</span>
-                      </div>
-                      <div className="mt-1">
-                        {t.description && t.description.trim() !== "" ? (
-                          <RichTextViewer html={t.description} />
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            No description.
-                          </p>
-                        )}
+                          )}
+                          <span>· {formatDate(t.createdAt)}</span>
+                        </div>
+                        <div className="mt-1">
+                          {t.description && t.description.trim() !== "" ? (
+                            <RichTextViewer html={t.description} />
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              No description.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <SubtaskPanel
-                    task={t}
-                    mentionUsers={mentionUsersForTask(t._id)}
-                    hashTasks={hashTasks}
-                    onSave={(next, subtaskMention) =>
-                      saveSubtasks(t._id, next, subtaskMention)
-                    }
-                  />
-
-                  <div className="flex items-center justify-between border-t border-border/40 px-4 pt-3 sm:px-6">
-                    <h3 className="text-sm font-semibold">Comments</h3>
-                    <span className="text-[11px] text-muted-foreground">
-                      {state.comments.length}
-                    </span>
-                  </div>
-
-                  <div className="border-b border-border/40 px-4 py-2 sm:px-6">
-                    {!state.composerOpen ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateTaskTab(t._id, { composerOpen: true })
+                    <SubtaskPanel
+                        task={t}
+                        mentionUsers={mentionUsersForTask(t._id)}
+                        hashTasks={hashTasks}
+                        projectMembers={project.assignees}
+                        onSave={(next, subtaskMention) =>
+                          saveSubtasks(t._id, next, subtaskMention)
                         }
-                        className="flex w-full items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                      >
-                        <MessageSquare className="size-3.5 text-muted-foreground" />
-                        Comment...
-                      </button>
-                    ) : (
-                      <form
-                        onSubmit={(e) => postTaskComment(e, t._id)}
-                        className="space-y-3"
-                      >
-                        <FormAlert message={state.alert} />
-                        <RichTextEditor
-                          value={state.draft}
-                          onChange={(v) => {
-                            updateTaskTab(t._id, {
-                              draft: v,
-                              alert: state.alert ? null : state.alert,
-                            });
-                          }}
-                          placeholder="Reply — @mention, #link tasks, paste URLs…"
-                          minHeight="min-h-20"
-                          mentionUsers={mentionUsersForTask(t._id)}
-                          hashTasks={hashTasks}
-                        />
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              updateTaskTab(t._id, {
-                                draft: "",
-                                alert: null,
-                                composerOpen: false,
-                              })
-                            }
-                            disabled={state.posting}
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            type="submit"
-                            disabled={state.posting}
-                            size="sm"
-                          >
-                            <Send className="mr-2 size-4" />
-                            {state.posting ? "Posting…" : "Post comment"}
-                          </Button>
-                        </div>
-                      </form>
-                    )}
-                  </div>
+                      />
 
-                  {state.loading ? (
-                    <div className="space-y-4 px-4 py-4 sm:px-6">
-                      {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="flex items-start gap-2.5">
-                          <Skeleton className="size-7 shrink-0 rounded-full" />
-                          <div className="flex-1 space-y-1.5">
-                            <div className="flex items-center gap-1.5">
-                              <Skeleton className="h-3 w-24" />
-                              <Skeleton className="h-3 w-10 rounded-full" />
-                              <Skeleton className="h-3 w-16" />
-                            </div>
-                            <Skeleton
-                              className="h-3"
-                              style={{ width: `${70 - i * 12}%` }}
-                            />
-                            <Skeleton
-                              className="h-3"
-                              style={{ width: `${55 - i * 10}%` }}
-                            />
+                      <div>
+                        <div className="flex items-center justify-between border-b border-border/40 px-4 py-2.5 sm:px-6">
+                          <div className="flex items-center gap-2">
+                            <MessageSquare className="size-4 text-primary" />
+                            <h3 className="text-sm font-semibold tracking-tight">
+                              Comments
+                            </h3>
+                            <span className="rounded-full border bg-background px-1.5 py-0 text-[11px] font-medium text-muted-foreground">
+                              {state.comments.length}
+                            </span>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : state.comments.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-1 p-6 text-center">
-                      <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
-                        <MessageSquare className="size-4" />
-                      </div>
-                      <p className="mt-1 text-sm font-semibold">
-                        No comments yet
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Start the discussion — be the first to reply.
-                      </p>
-                    </div>
-                  ) : (
-                    <ul className="divide-y divide-border/40">
-                      {[...state.comments]
-                        .sort(
-                          (a, b) =>
-                            new Date(b.createdAt ?? 0).getTime() -
-                            new Date(a.createdAt ?? 0).getTime()
-                        )
-                        .map((c) =>
-                          c.kind === "system" ? (
-                            <li
-                              key={c._id}
-                              className="flex items-center gap-2 px-4 py-1 text-[11px] text-muted-foreground sm:px-6"
-                            >
-                              <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] text-muted-foreground">
-                                •
-                              </span>
-                              <span>
-                                <span className="font-medium text-foreground">
-                                  {c.author?.name ?? "System"}
-                                </span>{" "}
-                                {c.body}{" "}
-                                <span className="text-muted-foreground">
-                                  · {formatDate(c.createdAt)}
-                                </span>
-                              </span>
-                            </li>
-                          ) : (
-                            <li
-                              key={c._id}
-                              className="flex items-start gap-2 px-4 py-1.5 sm:px-6"
-                            >
-                              <UserInitialsAvatar
-                                name={c.author?.name ?? "?"}
-                                role={c.author?.role}
-                                className="size-6 text-[9px]"
-                              />
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                                  <span className="font-medium text-foreground">
-                                    {c.author?.name ?? "Unknown"}
-                                  </span>
-                                  {c.author?.role && (
-                                    <RoleBadge role={c.author.role} />
-                                  )}
-                                  <span>· {formatDate(c.createdAt)}</span>
-                                </div>
-                                <div className="mt-1">
-                                  <RichTextViewer html={c.body} />
-                                </div>
-                              </div>
-                            </li>
-                          )
+
+                        <div className="border-b border-border/40 px-4 py-2 sm:px-6">
+                        {!state.composerOpen ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateTaskTab(t._id, { composerOpen: true })
+                            }
+                            className="flex w-full items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                          >
+                            <MessageSquare className="size-3.5 text-muted-foreground" />
+                            Comment...
+                          </button>
+                        ) : (
+                          <form
+                            onSubmit={(e) => postTaskComment(e, t._id)}
+                            className="space-y-3"
+                          >
+                            <FormAlert message={state.alert} />
+                            <RichTextEditor
+                              value={state.draft}
+                              onChange={(v) => {
+                                updateTaskTab(t._id, {
+                                  draft: v,
+                                  alert: state.alert ? null : state.alert,
+                                });
+                              }}
+                              placeholder="Reply — @mention, #link tasks, paste URLs…"
+                              minHeight="min-h-20"
+                              mentionUsers={mentionUsersForTask(t._id)}
+                              hashTasks={hashTasks}
+                            />
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  updateTaskTab(t._id, {
+                                    draft: "",
+                                    alert: null,
+                                    composerOpen: false,
+                                  })
+                                }
+                                disabled={state.posting}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="submit"
+                                disabled={state.posting}
+                                size="sm"
+                              >
+                                <Send className="mr-2 size-4" />
+                                {state.posting
+                                  ? "Posting…"
+                                  : "Post comment"}
+                              </Button>
+                            </div>
+                          </form>
                         )}
-                    </ul>
-                  )}
+                      </div>
+
+                      {state.loading ? (
+                        <div className="space-y-4 px-4 py-4">
+                          {Array.from({ length: 3 }).map((_, i) => (
+                            <div key={i} className="flex items-start gap-2.5">
+                              <Skeleton className="size-7 shrink-0 rounded-full" />
+                              <div className="flex-1 space-y-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <Skeleton className="h-3 w-24" />
+                                  <Skeleton className="h-3 w-10 rounded-full" />
+                                  <Skeleton className="h-3 w-16" />
+                                </div>
+                                <Skeleton
+                                  className="h-3"
+                                  style={{ width: `${70 - i * 12}%` }}
+                                />
+                                <Skeleton
+                                  className="h-3"
+                                  style={{ width: `${55 - i * 10}%` }}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : state.comments.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center gap-1 p-6 text-center">
+                          <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary ring-1 ring-primary/20">
+                            <MessageSquare className="size-4" />
+                          </div>
+                          <p className="mt-1 text-sm font-semibold">
+                            No comments yet
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Start the discussion — be the first to reply.
+                          </p>
+                        </div>
+                      ) : (
+                        <ul className="divide-y divide-border/40">
+                          {[...state.comments]
+                            .sort(
+                              (a, b) =>
+                                new Date(b.createdAt ?? 0).getTime() -
+                                new Date(a.createdAt ?? 0).getTime()
+                            )
+                            .map((c) =>
+                              c.kind === "system" ? (
+                                <li
+                                  key={c._id}
+                                  className="flex items-center gap-2 px-4 py-1 text-[11px] text-muted-foreground"
+                                >
+                                  <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] text-muted-foreground">
+                                    •
+                                  </span>
+                                  <span>
+                                    <span className="font-medium text-foreground">
+                                      {c.author?.name ?? "System"}
+                                    </span>{" "}
+                                    {c.body}{" "}
+                                    <span className="text-muted-foreground">
+                                      · {formatDate(c.createdAt)}
+                                    </span>
+                                  </span>
+                                </li>
+                              ) : (
+                                <li
+                                  key={c._id}
+                                  className="flex items-start gap-2 px-4 py-1.5"
+                                >
+                                  <UserInitialsAvatar
+                                    name={c.author?.name ?? "?"}
+                                    role={c.author?.role}
+                                    className="size-6 text-[9px]"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                      <span className="font-medium text-foreground">
+                                        {c.author?.name ?? "Unknown"}
+                                      </span>
+                                      <span>· {formatDate(c.createdAt)}</span>
+                                    </div>
+                                    <div className="mt-1">
+                                      <RichTextViewer html={c.body} />
+                                    </div>
+                                  </div>
+                                </li>
+                              )
+                            )}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+
+                    <aside className="scrollbar-hide border-t border-border/40 lg:border-t-0 lg:overflow-y-auto">
+                      <div className="flex items-center justify-between gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+                        <div className="flex items-center gap-2">
+                          <ClipboardList className="size-4 text-primary" />
+                          <h3 className="text-sm font-semibold tracking-tight">
+                            Task info
+                          </h3>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            aria-label="Copy task link"
+                            title={
+                              copiedTaskId === t._id
+                                ? "Copied!"
+                                : "Copy task link"
+                            }
+                            onClick={async () => {
+                              const url = `${window.location.origin}/dashboard/projects/${project._id}?task=${t._id}`;
+                              try {
+                                await navigator.clipboard.writeText(url);
+                                setCopiedTaskId(t._id);
+                                toast.success("Task link copied");
+                                setTimeout(() => {
+                                  setCopiedTaskId((c) =>
+                                    c === t._id ? null : c
+                                  );
+                                }, 1500);
+                              } catch {
+                                toast.error("Failed to copy");
+                              }
+                            }}
+                            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            {copiedTaskId === t._id ? (
+                              <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                            ) : (
+                              <Link2 className="size-3.5" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => closeTaskTab(t._id)}
+                            aria-label="Close tab"
+                            title="Close tab"
+                            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            <X className="size-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1 border-b border-border/40 px-4 py-3 sm:px-6">
+                        <h2 className="break-words text-base font-semibold leading-snug">
+                          {t.title}
+                        </h2>
+                        {t.taskId && (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {t.taskId}
+                          </span>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="space-y-3 px-4 py-3 text-sm sm:px-6">
+                          <InfoField label="Status">
+                            <Select
+                              value={t.status}
+                              onValueChange={(v) =>
+                                moveTask(t._id, v as TaskStatusKey)
+                              }
+                            >
+                              <SelectTrigger
+                                className={cn(
+                                  "h-9 w-full gap-1.5 px-3 text-sm font-medium shadow-none",
+                                  TASK_STATUS_STYLES[t.status].cls
+                                )}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {BOARD_COLUMNS.map((s) => (
+                                  <SelectItem key={s} value={s}>
+                                    <span className="flex items-center gap-2">
+                                      <span
+                                        className={cn(
+                                          "size-1.5 rounded-full",
+                                          TASK_STATUS_STYLES[s].dot
+                                        )}
+                                      />
+                                      {TASK_STATUS_STYLES[s].label}
+                                    </span>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </InfoField>
+
+                          <InfoField label="Priority">
+                            {canEditTask(t) ? (
+                              <PrioritySelect
+                                value={t.priority}
+                                onChange={(p) =>
+                                  patchTaskField(
+                                    t._id,
+                                    { priority: p },
+                                    { priority: p },
+                                    "priority"
+                                  )
+                                }
+                                triggerClassName="h-9 w-full px-3 text-sm"
+                              />
+                            ) : (
+                              <PriorityBadge priority={t.priority} />
+                            )}
+                          </InfoField>
+
+                          <InfoField label="Type">
+                            {canEditTask(t) ? (
+                              <Select
+                                value={t.type ?? "new"}
+                                onValueChange={(v) =>
+                                  patchTaskField(
+                                    t._id,
+                                    { type: v as TaskTypeKey },
+                                    { type: v as TaskTypeKey },
+                                    "type"
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="h-9 w-full text-sm shadow-none">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(Object.keys(TASK_TYPE_STYLES) as TaskTypeKey[]).map(
+                                    (k) => (
+                                      <SelectItem key={k} value={k}>
+                                        <span className="flex items-center gap-2">
+                                          <span
+                                            className={cn(
+                                              "size-1.5 rounded-full",
+                                              TASK_TYPE_STYLES[k].dot
+                                            )}
+                                          />
+                                          {TASK_TYPE_STYLES[k].label}
+                                        </span>
+                                      </SelectItem>
+                                    )
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <TaskTypeBadge type={t.type ?? "new"} />
+                            )}
+                          </InfoField>
+
+                          <InfoField label="Tags">
+                            {canEditTask(t) ? (
+                              <TagsInput
+                                value={t.tags ?? []}
+                                onChange={(next) =>
+                                  patchTaskField(
+                                    t._id,
+                                    { tags: next },
+                                    { tags: next },
+                                    "tags"
+                                  )
+                                }
+                                suggestions={projectTags}
+                                placeholder="Add tag"
+                              />
+                            ) : (t.tags ?? []).length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {(t.tags ?? []).map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="inline-flex items-center rounded-full border bg-muted/60 px-2 py-0.5 text-xs"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </InfoField>
+
+                          <InfoField label="Assigned">
+                            {canEditTask(t) ? (
+                              <DatePicker
+                                value={
+                                  t.assignedDate
+                                    ? new Date(t.assignedDate)
+                                    : null
+                                }
+                                onChange={(d) =>
+                                  patchTaskField(
+                                    t._id,
+                                    {
+                                      assignedDate: d
+                                        ? d.toISOString()
+                                        : null,
+                                    },
+                                    {
+                                      assignedDate: d
+                                        ? d.toISOString()
+                                        : null,
+                                    },
+                                    "assigned date"
+                                  )
+                                }
+                                className="h-9 text-sm"
+                                placeholder="Pick start"
+                              />
+                            ) : (
+                              <span className="text-sm">
+                                {t.assignedDate
+                                  ? formatDate(t.assignedDate)
+                                  : "—"}
+                              </span>
+                            )}
+                          </InfoField>
+
+                          <InfoField label="Due">
+                            {canEditTask(t) ? (
+                              <DatePicker
+                                value={
+                                  t.dueDate ? new Date(t.dueDate) : null
+                                }
+                                onChange={(d) =>
+                                  patchTaskField(
+                                    t._id,
+                                    {
+                                      dueDate: d ? d.toISOString() : null,
+                                    },
+                                    {
+                                      dueDate: d ? d.toISOString() : null,
+                                    },
+                                    "due date"
+                                  )
+                                }
+                                className="h-9 text-sm"
+                                placeholder="Pick due"
+                              />
+                            ) : (
+                              <span className="text-sm">
+                                {t.dueDate ? formatDate(t.dueDate) : "—"}
+                              </span>
+                            )}
+                          </InfoField>
+
+                          <InfoField label="Assignees">
+                            <TaskAssigneeRow
+                              selected={t.assignees}
+                              options={project.assignees}
+                              onChange={(next) =>
+                                updateTaskAssignees(t._id, next)
+                              }
+                              canEdit={canEditTask(t)}
+                            />
+                          </InfoField>
+
+                          <InfoField label="Reporting">
+                            <TaskAssigneeRow
+                              selected={t.reportingPersons ?? []}
+                              options={[
+                                ...project.assignees,
+                                ...(project.reportingTo ?? []),
+                              ]}
+                              onChange={(next) =>
+                                updateTaskReporting(t._id, next)
+                              }
+                              canEdit={canEditTask(t)}
+                            />
+                          </InfoField>
+
+                          <div className="border-t border-border/40 pt-3 text-xs text-muted-foreground">
+                            <div className="flex items-center justify-between gap-2">
+                              <span>Created by</span>
+                              <span className="font-medium text-foreground">
+                                {t.createdBy?.name ?? "—"}
+                              </span>
+                            </div>
+                            <div className="mt-1.5 flex items-center justify-between gap-2">
+                              <span>Created</span>
+                              <span>{formatDate(t.createdAt)}</span>
+                            </div>
+                            {t.updatedAt && (
+                              <div className="mt-1.5 flex items-center justify-between gap-2">
+                                <span>Updated</span>
+                                <span>{formatDate(t.updatedAt)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </aside>
                 </div>
               </TabsContent>
             );
@@ -2963,7 +3374,7 @@ export default function ProjectDetailPage() {
               <FieldError message={taskErrors.description} />
             </div>
 
-            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <Label>Status</Label>
                 <Select
@@ -2999,6 +3410,42 @@ export default function ProjectDetailPage() {
                   size="default"
                 />
               </div>
+              <div className="grid gap-1.5">
+                <Label>Type</Label>
+                <Select
+                  value={taskType}
+                  onValueChange={(v) => setTaskType(v as TaskTypeKey)}
+                >
+                  <SelectTrigger className="w-full shadow-none">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(TASK_TYPE_STYLES) as TaskTypeKey[]).map((k) => (
+                      <SelectItem key={k} value={k}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "size-1.5 rounded-full",
+                              TASK_TYPE_STYLES[k].dot
+                            )}
+                          />
+                          {TASK_TYPE_STYLES[k].label}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label>Tags</Label>
+              <TagsInput
+                value={taskTags}
+                onChange={setTaskTags}
+                suggestions={projectTags}
+                placeholder="Add tag — Enter to add"
+              />
             </div>
 
             <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
@@ -3207,6 +3654,7 @@ function SubtaskPanel({
   task,
   mentionUsers,
   hashTasks,
+  projectMembers,
   onSave,
 }: {
   task: Task;
@@ -3217,6 +3665,7 @@ function SubtaskPanel({
     role?: UserRole;
   }[];
   hashTasks?: HashTask[];
+  projectMembers?: UserLite[];
   onSave: (
     next: Subtask[],
     subtaskMention?: { title: string; mentionIds: string[] }
@@ -3310,12 +3759,11 @@ function SubtaskPanel({
   }
 
   return (
-    <div className="border-b border-border/40 px-4 py-2 sm:px-6">
-      <div className="mb-1.5 flex items-center gap-2">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Subtasks
-        </h3>
-        <span className="rounded-full border bg-background px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+    <div className="border-b border-border/40">
+      <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+        <ListChecks className="size-4 text-primary" />
+        <h3 className="text-sm font-semibold tracking-tight">Subtasks</h3>
+        <span className="rounded-full border bg-background px-1.5 py-0 text-[11px] font-medium text-muted-foreground">
           {done}/{total}
         </span>
         {total > 0 && (
@@ -3331,27 +3779,35 @@ function SubtaskPanel({
         )}
         {task.status !== "done" && total > 0 && !allDone && (
           <span className="ml-auto text-[11px] text-muted-foreground">
-            Task can&apos;t be Done until all subtasks complete
+            Complete all to mark Done
           </span>
         )}
       </div>
+      <div className="px-4 py-3 sm:px-6">
 
       {total > 0 && (
-        <ul className="mb-1.5 flex flex-col gap-0.5">
+        <ul className="mb-2 flex flex-col gap-2">
           {subtasks.map((s) => {
             const isEditing = editingId === s._id;
             return (
               <li
                 key={s._id}
-                className="group flex items-start gap-2 rounded-md px-1 py-0.5 hover:bg-muted/40"
+                className="group flex items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors hover:border-primary/30"
               >
-                <input
-                  type="checkbox"
-                  checked={s.completed}
-                  onChange={() => toggle(s._id)}
+                <button
+                  type="button"
+                  onClick={() => !isEditing && toggle(s._id)}
                   disabled={isEditing}
-                  className="mt-0.5 size-4 shrink-0 accent-primary"
-                />
+                  aria-label={s.completed ? "Mark incomplete" : "Mark complete"}
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-full border transition-colors",
+                    s.completed
+                      ? "border-emerald-500 bg-emerald-500 text-white"
+                      : "border-muted-foreground/40 hover:border-primary"
+                  )}
+                >
+                  {s.completed && <Check className="size-3" strokeWidth={3} />}
+                </button>
                 {isEditing ? (
                   <form
                     onSubmit={saveEdit}
@@ -3390,29 +3846,33 @@ function SubtaskPanel({
                   </form>
                 ) : (
                   <>
-                    <span
+                    <button
+                      type="button"
+                      onClick={() => startEdit(s)}
                       className={cn(
-                        "min-w-0 flex-1 break-words text-sm leading-5",
+                        "min-w-0 flex-1 break-words text-left text-sm leading-5",
                         s.completed && "text-muted-foreground line-through"
                       )}
                     >
                       {renderSubtaskTitle(s.title, hashTasks, mentionUsers)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => startEdit(s)}
-                      aria-label="Edit subtask"
-                      className="mt-0.5 shrink-0 opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
-                    >
-                      <Pencil className="size-3.5" />
                     </button>
+                    <SubtaskAssigneeControl
+                      value={s.assignee ?? null}
+                      members={projectMembers ?? []}
+                      onChange={(user) => {
+                        const next = subtasks.map((x) =>
+                          x._id === s._id ? { ...x, assignee: user } : x
+                        );
+                        onSave(next);
+                      }}
+                    />
                     <button
                       type="button"
                       onClick={() => setPendingRemove(s)}
                       aria-label="Remove subtask"
-                      className="mt-0.5 shrink-0 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                     >
-                      <X className="size-3.5" />
+                      <X className="size-4" />
                     </button>
                   </>
                 )}
@@ -3489,6 +3949,193 @@ function SubtaskPanel({
           <Plus className="size-3.5" /> Add subtask
         </button>
       )}
+      </div>
+    </div>
+  );
+}
+
+function SubtaskAssigneeControl({
+  value,
+  members,
+  onChange,
+}: {
+  value: UserLite | null;
+  members: UserLite[];
+  onChange: (user: UserLite | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = members.filter((u) =>
+    !q
+      ? true
+      : u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={value ? `Assigned to ${value.name}` : "Assign subtask"}
+          title={value ? `Assigned to ${value.name}` : "Assign subtask"}
+          className={cn(
+            "shrink-0 rounded-full transition-colors",
+            value
+              ? "ring-2 ring-transparent hover:ring-primary/30"
+              : "flex size-7 items-center justify-center border border-dashed border-muted-foreground/40 text-muted-foreground hover:border-primary hover:text-primary"
+          )}
+        >
+          {value ? (
+            <UserInitialsAvatar
+              name={value.name}
+              role={value.role}
+              className="size-7 text-[10px]"
+            />
+          ) : (
+            <UserPlus className="size-3.5" />
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-2" align="end">
+        <InputGroup className="h-8 mb-2 shadow-none">
+          <InputGroupAddon>
+            <Search className="size-3.5 text-muted-foreground" />
+          </InputGroupAddon>
+          <InputGroupInput
+            placeholder="Search member"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </InputGroup>
+        {value && (
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
+            className="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          >
+            <X className="size-3.5" /> Unassign
+          </button>
+        )}
+        <div className="max-h-60 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="px-2 py-2 text-xs text-muted-foreground">
+              No members found.
+            </p>
+          ) : (
+            <ul className="flex flex-col">
+              {filtered.map((u) => {
+                const selected = value?._id === u._id;
+                return (
+                  <li key={u._id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onChange(u);
+                        setOpen(false);
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                        selected
+                          ? "bg-primary/10 text-primary"
+                          : "hover:bg-muted"
+                      )}
+                    >
+                      <UserInitialsAvatar
+                        name={u.name}
+                        role={u.role}
+                        className="size-6 text-[10px]"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm">{u.name}</div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {u.email}
+                        </div>
+                      </div>
+                      {selected && <Check className="size-3.5" />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ProjectNameInline({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (next: string) => void | Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    if (!editing) setDraft(value);
+  }, [editing, value]);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="flex h-9 w-full items-center rounded-md border border-transparent bg-transparent px-3 text-left text-sm font-medium hover:border-border hover:bg-accent"
+      >
+        {value}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const next = draft.trim();
+        setEditing(false);
+        if (next.length >= 2 && next !== value) onSave(next);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.currentTarget as HTMLInputElement).blur();
+        } else if (e.key === "Escape") {
+          setDraft(value);
+          setEditing(false);
+        }
+      }}
+      className="h-9 w-full rounded-md border bg-background px-3 text-sm font-medium shadow-none outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30"
+    />
+  );
+}
+
+function InfoField({
+  label,
+  children,
+}: {
+  label: string;
+  stack?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -3785,75 +4432,63 @@ function PersonLine({ user }: { user: UserLite }) {
 
 function DetailSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Skeleton className="size-7 rounded-md" />
-          <Skeleton className="h-4 w-28" />
+    <div className="-mx-4 -my-6 flex min-h-[calc(100vh-3.5rem)] flex-col sm:-mx-6 sm:-my-8 lg:h-[calc(100vh-3.5rem)] lg:min-h-0 lg:overflow-hidden">
+      <div className="flex flex-1 min-w-0 flex-col lg:min-h-0">
+        <div className="flex items-center gap-1 border-b-2 border-border/60 px-2 py-1">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-24 rounded-md" />
+          ))}
+          <Skeleton className="ml-auto size-8 rounded-md" />
         </div>
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-8 w-20 rounded-md" />
-          <Skeleton className="h-8 w-24 rounded-md" />
-        </div>
-      </div>
 
-      <div className="rounded-xl border bg-card/40 p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-4">
-            <Skeleton className="size-14 shrink-0 rounded-xl" />
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-5 w-20 rounded-full" />
-                <Skeleton className="h-5 w-14 rounded-full" />
-              </div>
-              <Skeleton className="h-7 w-56" />
-              <Skeleton className="h-3 w-72" />
+        <div className="flex flex-1 flex-col lg:h-full lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 lg:border-r lg:border-border/40">
+            <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+              <Skeleton className="size-4 rounded" />
+              <Skeleton className="h-4 w-24" />
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Skeleton className="h-8 w-28 rounded-md" />
-            <Skeleton className="size-8 rounded-full" />
-            <Skeleton className="size-8 rounded-full" />
-            <Skeleton className="size-8 rounded-full" />
-          </div>
-        </div>
-      </div>
+            <div className="space-y-2 px-4 py-3 sm:px-6">
+              <Skeleton className="h-3 w-40" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-4/5" />
+            </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex flex-col gap-2 rounded-lg border bg-card/40 p-4">
-            <Skeleton className="h-3 w-20" />
-            <Skeleton className="h-6 w-16" />
-            <Skeleton className="h-3 w-24" />
+            <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+              <Skeleton className="size-4 rounded" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-6 rounded-full" />
+            </div>
+            <div className="border-b border-border/40 px-4 py-2 sm:px-6">
+              <Skeleton className="h-10 w-full rounded-md" />
+            </div>
+            <ul className="divide-y divide-border/40">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <li key={i} className="flex items-start gap-2 px-4 py-2 sm:px-6">
+                  <Skeleton className="size-6 shrink-0 rounded-full" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-3 w-40" />
+                    <Skeleton className="h-3 w-full" />
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
-        ))}
-      </div>
 
-      <div className="rounded-xl border bg-card/40">
-        <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-7 w-20 rounded-md" />
-          ))}
+          <aside className="border-t border-border/40 lg:border-t-0">
+            <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+              <Skeleton className="size-4 rounded" />
+              <Skeleton className="h-4 w-24" />
+            </div>
+            <div className="space-y-3 px-4 py-3 text-sm sm:px-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="space-y-1.5">
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="h-9 w-full rounded-md" />
+                </div>
+              ))}
+            </div>
+          </aside>
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-b border-border/40 px-4 py-2.5">
-          <Skeleton className="h-8 w-56 rounded-md" />
-          <Skeleton className="h-8 w-28 rounded-md" />
-          <Skeleton className="h-8 w-28 rounded-md" />
-          <Skeleton className="ml-auto h-6 w-24" />
-        </div>
-        <ul className="divide-y divide-border/40">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <li key={i} className="flex items-center gap-3 px-4 py-3">
-              <Skeleton className="size-8 shrink-0 rounded-md" />
-              <div className="flex-1 space-y-1.5">
-                <Skeleton className="h-3.5 w-2/5" />
-                <Skeleton className="h-3 w-1/3" />
-              </div>
-              <Skeleton className="h-6 w-20 rounded-full" />
-              <Skeleton className="size-7 rounded-full" />
-            </li>
-          ))}
-        </ul>
       </div>
     </div>
   );
@@ -3907,46 +4542,77 @@ function DetailError({ message }: { message: string }) {
 
 function TaskTabSkeleton() {
   return (
-    <div className="flex flex-col gap-0">
-      <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2 sm:px-6">
-        <Skeleton className="size-3.5 rounded" />
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-4 w-56 flex-1 max-w-md" />
-        <Skeleton className="ml-auto size-7 rounded-md" />
-      </div>
-      <div className="flex flex-wrap items-center gap-3 border-b border-border/40 bg-primary/5 px-4 py-2 sm:px-6">
-        <Skeleton className="h-7 w-32 rounded-md" />
-        <Skeleton className="h-6 w-40 rounded-full" />
-      </div>
-      <div className="px-4 py-4 sm:px-6 space-y-5">
-        <div className="rounded-lg border bg-card/40 p-4 space-y-2">
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-3 w-5/6" />
-          <Skeleton className="h-3 w-2/3" />
+    <div className="flex flex-col lg:h-full lg:grid lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="min-w-0 lg:border-r lg:border-border/40">
+        <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+          <Skeleton className="size-4 rounded" />
+          <Skeleton className="h-4 w-24" />
         </div>
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-16" />
-          {Array.from({ length: 3 }).map((_, i) => (
+        <div className="space-y-2 px-4 py-3 sm:px-6">
+          <Skeleton className="h-3 w-40" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-3/4" />
+        </div>
+
+        <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+          <Skeleton className="size-4 rounded" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-10 rounded-full" />
+        </div>
+        <div className="space-y-2 px-4 py-2 sm:px-6">
+          {Array.from({ length: 2 }).map((_, i) => (
             <div key={i} className="flex items-center gap-2">
-              <Skeleton className="size-4 rounded" />
+              <Skeleton className="size-4 rounded-full" />
               <Skeleton className="h-3 flex-1 max-w-md" />
             </div>
           ))}
         </div>
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-20" />
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <Skeleton className="size-7 shrink-0 rounded-full" />
+
+        <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+          <Skeleton className="size-4 rounded" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-6 rounded-full" />
+        </div>
+        <div className="border-b border-border/40 px-4 py-2 sm:px-6">
+          <Skeleton className="h-10 w-full rounded-md" />
+        </div>
+        <ul className="divide-y divide-border/40">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <li key={i} className="flex items-start gap-2 px-4 py-2 sm:px-6">
+              <Skeleton className="size-6 shrink-0 rounded-full" />
               <div className="flex-1 space-y-1.5">
                 <Skeleton className="h-3 w-32" />
                 <Skeleton className="h-3 w-3/4" />
               </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <aside className="border-t border-border/40 lg:border-t-0">
+        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+          <div className="flex items-center gap-2">
+            <Skeleton className="size-4 rounded" />
+            <Skeleton className="h-4 w-20" />
+          </div>
+          <div className="flex items-center gap-1">
+            <Skeleton className="size-7 rounded-md" />
+            <Skeleton className="size-7 rounded-md" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-1 border-b border-border/40 px-4 py-3 sm:px-6">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+        <div className="space-y-3 px-4 py-3 text-sm sm:px-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="space-y-1.5">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-9 w-full rounded-md" />
             </div>
           ))}
         </div>
-      </div>
+      </aside>
     </div>
   );
 }

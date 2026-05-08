@@ -135,6 +135,54 @@ export function TaskStatusBadge({
   );
 }
 
+export type TaskTypeKey = "new" | "bug" | "production_bug";
+
+export const TASK_TYPE_STYLES: Record<
+  TaskTypeKey,
+  { label: string; cls: string; dot: string }
+> = {
+  new: {
+    label: "New",
+    cls:
+      "bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:bg-sky-500/15 dark:text-sky-400 dark:ring-sky-500/30",
+    dot: "bg-sky-500",
+  },
+  bug: {
+    label: "Bug",
+    cls:
+      "bg-amber-500/10 text-amber-700 ring-amber-500/25 dark:bg-amber-500/15 dark:text-amber-400 dark:ring-amber-500/30",
+    dot: "bg-amber-500",
+  },
+  production_bug: {
+    label: "Production Bug",
+    cls:
+      "bg-red-500/10 text-red-700 ring-red-500/25 dark:bg-red-500/15 dark:text-red-400 dark:ring-red-500/30",
+    dot: "bg-red-500",
+  },
+};
+
+export function TaskTypeBadge({
+  type,
+  className,
+}: {
+  type: TaskTypeKey;
+  className?: string;
+}) {
+  const c = TASK_TYPE_STYLES[type];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+        c.cls,
+        className
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", c.dot)} />
+      {c.label}
+    </span>
+  );
+}
+
 const ROLE_AVATAR_STYLES: Record<UserRole, string> = {
   admin: "bg-red-600 text-white",
   project_manager: "bg-amber-500 text-white",

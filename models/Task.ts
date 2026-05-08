@@ -19,6 +19,15 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   done: "Done",
 };
 
+export const TASK_TYPES = ["new", "bug", "production_bug"] as const;
+export type TaskType = (typeof TASK_TYPES)[number];
+
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  new: "New",
+  bug: "Bug",
+  production_bug: "Production Bug",
+};
+
 export {
   TASK_PRIORITIES,
   TASK_PRIORITY_LABELS,
@@ -30,6 +39,11 @@ const SubtaskSchema = new Schema(
   {
     title: { type: String, required: true, trim: true },
     completed: { type: Boolean, default: false },
+    assignee: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   { timestamps: true }
 );
@@ -71,12 +85,26 @@ const TaskSchema = new Schema(
     assignees: [{ type: Schema.Types.ObjectId, ref: "User" }],
     reportingPersons: [{ type: Schema.Types.ObjectId, ref: "User" }],
     subtasks: { type: [SubtaskSchema], default: [] },
+    tags: { type: [String], default: [] },
+    type: {
+      type: String,
+      enum: TASK_TYPES,
+      default: "new",
+      required: true,
+    },
   },
   { timestamps: true }
 );
 
 export type TaskShape = InferSchemaType<typeof TaskSchema>;
 export type TaskDoc = TaskShape & { _id: mongoose.Types.ObjectId };
+
+if (
+  process.env.NODE_ENV !== "production" &&
+  mongoose.models.Task
+) {
+  mongoose.deleteModel("Task");
+}
 
 const Task: Model<TaskDoc> =
   (mongoose.models.Task as Model<TaskDoc>) ||

@@ -10,6 +10,14 @@ export const metadata: Metadata = {
     template: "%s · Projectly",
   },
   description: "Project management for teams — manage projects, tasks, and users.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/logo.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/logo.png",
+  },
 };
 
 const outfit = Outfit({

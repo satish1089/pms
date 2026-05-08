@@ -208,7 +208,7 @@ export default function DashboardHome() {
   const canManage = role === "admin" || role === "project_manager";
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
@@ -408,7 +408,7 @@ function HoursTrendChart({
   const totalWeek = data.reduce((s, d) => s + d.hours, 0);
   const peak = Math.max(0, ...data.map((d) => d.hours));
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-card p-5 shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <TrendingUp className="size-4 text-emerald-600 dark:text-emerald-400" />
@@ -517,7 +517,7 @@ function StatusDonutChart({
     .filter((d) => d.value > 0);
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-card p-5 shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ListChecks className="size-4 text-sky-600 dark:text-sky-400" />
@@ -609,7 +609,7 @@ function StatCard({
     <Link href={href} className="group">
       <div
         className={cn(
-          "flex h-full items-center gap-3 rounded-xl border bg-card p-3.5 shadow-sm transition-all hover:shadow-md",
+          "flex h-full items-center gap-3 rounded-xl border bg-card p-3.5 transition-colors",
           t.ring
         )}
       >
@@ -655,7 +655,7 @@ function HoursStatCard({
   return (
     <div
       className={cn(
-        "flex h-full items-center gap-3 rounded-xl border bg-card p-3.5 shadow-sm transition-all",
+        "flex h-full items-center gap-3 rounded-xl border bg-card p-3.5 transition-all",
         t.ring
       )}
     >
@@ -710,7 +710,7 @@ function StatusDistributionCard({
   return (
     <div
       className={cn(
-        "flex h-full flex-col rounded-xl border bg-card p-5 shadow-sm",
+        "flex h-full flex-col rounded-xl border bg-card p-5",
         className
       )}
     >
@@ -779,7 +779,7 @@ function TopLoggersCard({
 }) {
   const max = Math.max(1, ...loggers.map((l) => l.total));
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-card p-5 shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Clock className="size-4 text-emerald-600 dark:text-emerald-400" />
@@ -847,7 +847,7 @@ function TeamCard({
   loading: boolean;
 }) {
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-card p-5 shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Users className="size-4 text-violet-600 dark:text-violet-400" />
@@ -943,7 +943,7 @@ function RecentLogsCard({
   loading: boolean;
 }) {
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-card p-5 shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Clock className="size-4 text-emerald-600 dark:text-emerald-400" />
@@ -1013,7 +1013,7 @@ function Panel<T extends { _id: string }>({
   render: (item: T) => React.ReactNode;
 }) {
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-card shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border bg-card">
       <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
         <h2 className="text-base font-semibold">{title}</h2>
         <Link

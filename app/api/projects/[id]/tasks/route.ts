@@ -9,6 +9,7 @@ import Task, {
   TASK_PRIORITIES,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
+  TASK_TYPES,
 } from "@/models/Task";
 import { nextSeq } from "@/models/Counter";
 import { getSession } from "@/lib/auth";
@@ -37,6 +38,11 @@ const createSchema = z.object({
   description: z.string().default(""),
   status: z.enum(TASK_STATUSES).default("todo"),
   priority: z.enum(TASK_PRIORITIES).default("medium"),
+  type: z.enum(TASK_TYPES).default("new"),
+  tags: z
+    .array(z.string().trim().min(1).max(40))
+    .default([])
+    .transform((arr) => Array.from(new Set(arr.map((s) => s.trim()).filter(Boolean)))),
   assignedDate: isoDate,
   dueDate: isoDate,
   assignees: z.array(z.string()).default([]),
@@ -88,6 +94,11 @@ export async function GET(
       .populate("createdBy", "name email role")
       .populate("assignees", "name email role")
       .populate("reportingPersons", "name email role")
+      .populate({
+        path: "subtasks.assignee",
+        select: "name email role",
+        strictPopulate: false,
+      })
       .lean();
 
     return NextResponse.json({ tasks });
@@ -130,6 +141,8 @@ export async function POST(
       description,
       status: parsed.data.status,
       priority: parsed.data.priority,
+      type: parsed.data.type,
+      tags: parsed.data.tags,
       assignedDate: parsed.data.assignedDate,
       dueDate: parsed.data.dueDate,
       createdBy: new mongoose.Types.ObjectId(session.sub),

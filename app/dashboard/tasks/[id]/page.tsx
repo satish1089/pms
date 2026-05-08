@@ -356,8 +356,11 @@ export default function TaskDetailPage() {
     }
   }
 
-  const canManage =
+  const isManager =
     session?.role === "admin" || session?.role === "project_manager";
+  const isTaskCreator =
+    !!session?._id && task?.createdBy?._id === session._id;
+  const canManage = isManager || isTaskCreator;
 
   const mentionUsers = useMemo(() => {
     if (!task) return [];

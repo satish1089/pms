@@ -5,8 +5,8 @@ import Link from "next/link";
 import {
   CalendarClock,
   CalendarDays,
-  ChevronLeft,
-  ChevronRight,
+  Check,
+  ChevronsUpDown,
   ExternalLink,
   Eye,
   FileText,
@@ -53,6 +53,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -67,11 +80,15 @@ import { Input } from "@/components/ui/input";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   TASK_STATUS_STYLES,
+  TASK_TYPE_STYLES,
   TaskStatusBadge,
+  TaskTypeBadge,
   type TaskStatusKey,
+  type TaskTypeKey,
   UserInitialsAvatar,
 } from "@/components/role-status-badge";
 import { PriorityBadge, PrioritySelect } from "@/components/priority-badge";
+import { TagsInput } from "@/components/tags-input";
 import { FieldError, FormAlert, RequiredMark } from "@/components/form-error";
 import { RichTextEditor, RichTextViewer } from "@/components/rich-text-editor";
 import { UserMultiPicker } from "@/components/user-pickers";
@@ -97,10 +114,13 @@ type TaskPriorityKey = "low" | "medium" | "high" | "urgent";
 
 type Task = {
   _id: string;
+  taskId?: string | null;
   title: string;
   description?: string | null;
   status: TaskStatusKey;
   priority: TaskPriorityKey;
+  type: TaskTypeKey;
+  tags: string[];
   assignedDate: string | null;
   dueDate: string | null;
   project: ProjectLite | null;
@@ -118,7 +138,6 @@ type Session = {
   role: UserRole;
 };
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50];
 const BOARD_LIMIT = 200;
 const STATUS_OPTIONS: { value: "all" | TaskStatusKey; label: string }[] = [
   { value: "all", label: "All status" },
@@ -176,8 +195,13 @@ export default function TasksPage() {
   const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriorityKey>(
     "all"
   );
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
+  const [typeFilter, setTypeFilter] = useState<"all" | TaskTypeKey>("all");
+  const [tagFilter, setTagFilter] = useState<string>("");
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 25;
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(1);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<TaskStatusKey | null>(null);
@@ -187,7 +211,6 @@ export default function TasksPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setDebouncedQuery(query.trim());
-      setPage(1);
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -195,8 +218,16 @@ export default function TasksPage() {
   }, [query]);
 
   useEffect(() => {
-    setPage(1);
-  }, [projectFilter, statusFilter, priorityFilter, limit, view]);
+    pageRef.current = 1;
+  }, [
+    projectFilter,
+    statusFilter,
+    priorityFilter,
+    typeFilter,
+    tagFilter,
+    view,
+    debouncedQuery,
+  ]);
 
   useEffect(() => {
     (async () => {
@@ -218,51 +249,100 @@ export default function TasksPage() {
     })();
   }, []);
 
-  const loadTasks = useCallback(async () => {
-    setLoading(true);
-    try {
-      const effectiveLimit = view === "board" ? BOARD_LIMIT : limit;
-      const effectivePage = view === "board" ? 1 : page;
-      const params = new URLSearchParams({
-        page: String(effectivePage),
-        limit: String(effectiveLimit),
-      });
-      if (debouncedQuery) params.set("q", debouncedQuery);
-      if (projectFilter !== "all") params.set("project", projectFilter);
-      if (view === "list" && statusFilter !== "all")
-        params.set("status", statusFilter);
-      if (priorityFilter !== "all") params.set("priority", priorityFilter);
+  const fetchTasksPage = useCallback(
+    async (pageNum: number, append: boolean) => {
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+      try {
+        const effectiveLimit = view === "board" ? BOARD_LIMIT : PAGE_SIZE;
+        const params = new URLSearchParams({
+          page: String(view === "board" ? 1 : pageNum),
+          limit: String(effectiveLimit),
+        });
+        if (debouncedQuery) params.set("q", debouncedQuery);
+        if (projectFilter !== "all") params.set("project", projectFilter);
+        if (view === "list" && statusFilter !== "all")
+          params.set("status", statusFilter);
+        if (priorityFilter !== "all") params.set("priority", priorityFilter);
+        if (typeFilter !== "all") params.set("type", typeFilter);
+        if (tagFilter.trim()) params.set("tag", tagFilter.trim());
 
-      const res = await fetch(`/api/tasks?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load tasks");
-      setTasks(data.tasks ?? []);
-      setTotal(data.total ?? 0);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load tasks");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, limit, debouncedQuery, projectFilter, statusFilter, priorityFilter, view]);
+        const res = await fetch(`/api/tasks?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load tasks");
+        const fetched: Task[] = data.tasks ?? [];
+        setTasks((prev) => (append ? [...prev, ...fetched] : fetched));
+        setTotal(data.total ?? 0);
+        if (view === "board") {
+          setHasMore(false);
+        } else {
+          const totalPages = Math.max(
+            1,
+            Math.ceil((data.total ?? 0) / effectiveLimit)
+          );
+          setHasMore(pageNum < totalPages);
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to load tasks");
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [
+      debouncedQuery,
+      projectFilter,
+      statusFilter,
+      priorityFilter,
+      typeFilter,
+      tagFilter,
+      view,
+    ]
+  );
 
   useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
+    pageRef.current = 1;
+    fetchTasksPage(1, false);
+  }, [fetchTasksPage]);
 
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const rangeStart = total === 0 ? 0 : (page - 1) * limit + 1;
-  const rangeEnd = Math.min(page * limit, total);
+  useEffect(() => {
+    if (view === "board" || !hasMore || loading || loadingMore) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          pageRef.current += 1;
+          fetchTasksPage(pageRef.current, true);
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [view, hasMore, loading, loadingMore, fetchTasksPage]);
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    tasks.forEach((t) => (t.tags ?? []).forEach((tag) => tag && set.add(tag)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [tasks]);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
+
   const hasFilters =
     Boolean(debouncedQuery) ||
     projectFilter !== "all" ||
     statusFilter !== "all" ||
-    priorityFilter !== "all";
+    priorityFilter !== "all" ||
+    typeFilter !== "all" ||
+    tagFilter.trim() !== "";
 
   function clearFilters() {
     setQuery("");
     setProjectFilter("all");
     setStatusFilter("all");
     setPriorityFilter("all");
+    setTypeFilter("all");
+    setTagFilter("");
   }
 
   const isUser = session?.role === "user";
@@ -358,6 +438,8 @@ export default function TasksPage() {
   const [editDesc, setEditDesc] = useState("");
   const [editStatus, setEditStatus] = useState<TaskStatusKey>("todo");
   const [editPriority, setEditPriority] = useState<TaskPriorityKey>("medium");
+  const [editType, setEditType] = useState<TaskTypeKey>("new");
+  const [editTags, setEditTags] = useState<string[]>([]);
   const [editAssigned, setEditAssigned] = useState<Date | null>(null);
   const [editDue, setEditDue] = useState<Date | null>(null);
   const [editAssignees, setEditAssignees] = useState<UserLite[]>([]);
@@ -377,6 +459,8 @@ export default function TasksPage() {
     setEditDesc(t.description ?? "");
     setEditStatus(t.status);
     setEditPriority(t.priority ?? "medium");
+    setEditType(t.type ?? "new");
+    setEditTags(t.tags ?? []);
     setEditAssigned(t.assignedDate ? new Date(t.assignedDate) : null);
     setEditDue(t.dueDate ? new Date(t.dueDate) : null);
     setEditAssignees(t.assignees ?? []);
@@ -408,6 +492,8 @@ export default function TasksPage() {
           description: editDesc,
           status: editStatus,
           priority: editPriority,
+          type: editType,
+          tags: editTags,
           assignedDate: editAssigned ? editAssigned.toISOString() : null,
           dueDate: editDue ? editDue.toISOString() : null,
           assignees: editAssignees.map((u) => u._id),
@@ -567,6 +653,72 @@ export default function TasksPage() {
               ))}
             </SelectContent>
           </Select>
+          <Select
+            value={typeFilter}
+            onValueChange={(v) => setTypeFilter(v as "all" | TaskTypeKey)}
+          >
+            <SelectTrigger className={`w-full sm:w-36 ${controlClasses}`}>
+              <SelectValue placeholder="All types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              {(Object.keys(TASK_TYPE_STYLES) as TaskTypeKey[]).map((k) => (
+                <SelectItem key={k} value={k}>
+                  {TASK_TYPE_STYLES[k].label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Popover open={tagFilterOpen} onOpenChange={setTagFilterOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={tagFilterOpen}
+                className={`h-9 w-full justify-between font-normal sm:w-36 ${controlClasses} ${tagFilter ? "" : "text-muted-foreground"}`}
+              >
+                <span className="truncate">{tagFilter || "All tags"}</span>
+                <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[220px] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search tag…" />
+                <CommandList>
+                  <CommandEmpty>No tags found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem
+                      value="__all__"
+                      onSelect={() => {
+                        setTagFilter("");
+                        setTagFilterOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={`mr-2 size-4 ${tagFilter === "" ? "opacity-100" : "opacity-0"}`}
+                      />
+                      All tags
+                    </CommandItem>
+                    {allTags.map((tag) => (
+                      <CommandItem
+                        key={tag}
+                        value={tag}
+                        onSelect={(v) => {
+                          setTagFilter(v === tagFilter ? "" : v);
+                          setTagFilterOpen(false);
+                        }}
+                      >
+                        <Check
+                          className={`mr-2 size-4 ${tagFilter === tag ? "opacity-100" : "opacity-0"}`}
+                        />
+                        <span className="truncate">{tag}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
           {hasFilters && (
             <Button
               variant="ghost"
@@ -604,6 +756,7 @@ export default function TasksPage() {
                   <TableHead className="h-10 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Title</TableHead>
                   <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status</TableHead>
                   <TableHead className="h-10 w-28 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Priority</TableHead>
+                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Type</TableHead>
                   <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Due</TableHead>
                   <TableHead className="h-10 w-56 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Project</TableHead>
                   <TableHead className="h-10 w-36 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Assignees</TableHead>
@@ -613,13 +766,16 @@ export default function TasksPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  Array.from({ length: Math.min(limit, 5) }).map((_, i) => (
+                  Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i} className="border-border/40 hover:bg-transparent">
                       <TableCell className="px-3 py-2.5">
                         <Skeleton className="h-4 w-56" />
                       </TableCell>
                       <TableCell className="px-3 py-2.5">
                         <Skeleton className="h-5 w-20 rounded-full" />
+                      </TableCell>
+                      <TableCell className="px-3 py-2.5">
+                        <Skeleton className="h-5 w-16 rounded-full" />
                       </TableCell>
                       <TableCell className="px-3 py-2.5">
                         <Skeleton className="h-5 w-16 rounded-full" />
@@ -641,7 +797,7 @@ export default function TasksPage() {
                   ))
                 ) : tasks.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={8} className="h-40">
+                    <TableCell colSpan={9} className="h-40">
                       <EmptyState
                         hasFilters={hasFilters}
                         onClear={clearFilters}
@@ -693,7 +849,7 @@ export default function TasksPage() {
                                 <Pencil className="size-3.5" />
                               </button>
                             )}
-                            {isAdmin && (
+                            {canEdit && (
                               <button
                                 type="button"
                                 aria-label="Delete task"
@@ -705,6 +861,23 @@ export default function TasksPage() {
                               </button>
                             )}
                           </div>
+                          {(t.tags ?? []).length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {(t.tags ?? []).slice(0, 3).map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="inline-flex items-center rounded-full border bg-muted/40 px-1.5 py-0 text-[10px] font-medium text-muted-foreground"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                              {(t.tags ?? []).length > 3 && (
+                                <span className="inline-flex items-center rounded-full border bg-muted/40 px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                                  +{(t.tags ?? []).length - 3}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="px-3 py-2.5">
                           <InlineStatusSelect
@@ -715,6 +888,9 @@ export default function TasksPage() {
                         </TableCell>
                         <TableCell className="px-3 py-2.5">
                           <PriorityBadge priority={t.priority} />
+                        </TableCell>
+                        <TableCell className="px-3 py-2.5">
+                          <TaskTypeBadge type={t.type ?? "new"} />
                         </TableCell>
                         <TableCell className="px-3 py-2.5 text-xs">
                           <DueLabel due={t.dueDate} isDone={t.status === "done"} />
@@ -739,6 +915,12 @@ export default function TasksPage() {
                         </TableCell>
                         <TableCell className="px-3 py-2.5 text-sm text-muted-foreground">
                           {t.createdBy?.name ?? "—"}
+                          {!!session?._id &&
+                            t.createdBy?._id === session._id && (
+                              <span className="ml-1 text-xs text-primary">
+                                (you)
+                              </span>
+                            )}
                         </TableCell>
                         <TableCell className="px-3 py-2.5" />
                       </TableRow>
@@ -769,7 +951,9 @@ export default function TasksPage() {
               </div>
             ) : (
               <ul className="divide-y rounded-lg border">
-                {tasks.map((t) => (
+                {tasks.map((t) => {
+                  const { canEdit: canDel } = permsFor(t);
+                  return (
                   <li
                     key={t._id}
                     className={cn("flex flex-col gap-2 p-4", STATUS_ROW_BG[t.status])}
@@ -785,7 +969,7 @@ export default function TasksPage() {
                       ) : (
                         <span className="font-medium">{t.title}</span>
                       )}
-                      {isAdmin && (
+                      {canDel && (
                         <button
                           type="button"
                           aria-label="Delete task"
@@ -811,66 +995,24 @@ export default function TasksPage() {
                     </div>
                     <AssigneeStack assignees={t.assignees} />
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>
-                {total === 0
-                  ? "No results"
-                  : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
-              </span>
-              <span className="mx-1 hidden text-border sm:inline">·</span>
-              <div className="hidden items-center gap-2 sm:flex">
-                <span>Rows per page</span>
-                <Select
-                  value={String(limit)}
-                  onValueChange={(v) => setLimit(Number(v))}
-                >
-                  <SelectTrigger
-                    className={`h-7 w-16 px-2 py-0 text-xs [&_svg]:size-3 ${controlClasses}`}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {n}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          {tasks.length > 0 && (
+            <div
+              ref={sentinelRef}
+              className="flex items-center justify-center py-4 text-xs text-muted-foreground"
+            >
+              {loadingMore
+                ? "Loading more…"
+                : hasMore
+                ? "Scroll for more"
+                : `All ${total} tasks loaded`}
             </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className={`h-7 px-2 text-xs ${controlClasses}`}
-                disabled={loading || page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                <ChevronLeft className="size-3.5" /> Previous
-              </Button>
-              <div className="text-xs text-muted-foreground">
-                Page <span className="font-medium text-foreground">{page}</span> of{" "}
-                <span className="font-medium text-foreground">{totalPages}</span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className={`h-7 px-2 text-xs ${controlClasses}`}
-                disabled={loading || page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Next <ChevronRight className="size-3.5" />
-              </Button>
-            </div>
-          </div>
+          )}
         </>
       )}
 
@@ -900,6 +1042,10 @@ export default function TasksPage() {
         setStatus={setEditStatus}
         priority={editPriority}
         setPriority={setEditPriority}
+        taskType={editType}
+        setTaskType={setEditType}
+        tags={editTags}
+        setTags={setEditTags}
         assignedDate={editAssigned}
         setAssignedDate={setEditAssigned}
         dueDate={editDue}
@@ -1037,7 +1183,7 @@ function BoardView({
                         dragging={draggingId === t._id}
                         canEdit={canEdit}
                         canMove={canMove}
-                        canDelete={isAdmin}
+                        canDelete={canEdit}
                         onEdit={() => openEditTask(t)}
                         onView={() => openViewTask(t)}
                         onDelete={() => onDelete(t)}
@@ -1600,6 +1746,10 @@ function EditTaskDialog({
   setStatus,
   priority,
   setPriority,
+  taskType,
+  setTaskType,
+  tags,
+  setTags,
   assignedDate,
   setAssignedDate,
   dueDate,
@@ -1625,6 +1775,10 @@ function EditTaskDialog({
   setStatus: (v: TaskStatusKey) => void;
   priority: TaskPriorityKey;
   setPriority: (v: TaskPriorityKey) => void;
+  taskType: TaskTypeKey;
+  setTaskType: (v: TaskTypeKey) => void;
+  tags: string[];
+  setTags: (v: string[]) => void;
   assignedDate: Date | null;
   setAssignedDate: (v: Date | null) => void;
   dueDate: Date | null;
@@ -1689,7 +1843,7 @@ function EditTaskDialog({
             <FieldError message={errors.description} />
           </div>
 
-          <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-3">
             <div className="grid gap-1.5">
               <Label>Status</Label>
               <Select
@@ -1725,6 +1879,41 @@ function EditTaskDialog({
                 size="default"
               />
             </div>
+            <div className="grid gap-1.5">
+              <Label>Type</Label>
+              <Select
+                value={taskType}
+                onValueChange={(v) => setTaskType(v as TaskTypeKey)}
+              >
+                <SelectTrigger className="w-full shadow-none">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(TASK_TYPE_STYLES) as TaskTypeKey[]).map((k) => (
+                    <SelectItem key={k} value={k}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "size-1.5 rounded-full",
+                            TASK_TYPE_STYLES[k].dot
+                          )}
+                        />
+                        {TASK_TYPE_STYLES[k].label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label>Tags</Label>
+            <TagsInput
+              value={tags}
+              onChange={setTags}
+              placeholder="Add tag — Enter to add"
+            />
           </div>
 
           <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">

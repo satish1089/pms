@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { redirect } from "next/navigation";
 import {
   SidebarInset,
@@ -33,16 +34,21 @@ export default async function DashboardLayout({
         <header className="z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-background/85 px-3 backdrop-blur-md sm:px-5">
           <SidebarTrigger className="-ml-1 size-8 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" />
           <div className="flex min-w-0 items-center gap-2">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold sm:hidden">
-              P
-            </div>
+            <Image
+              src="/logo.png"
+              alt="Projectly"
+              width={28}
+              height={28}
+              priority
+              className="size-7 shrink-0 rounded-md sm:hidden"
+            />
             <DashboardHeaderTitle />
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-1">
             <NotificationsBell />
             <Separator
               orientation="vertical"
-              className="mx-0.5 h-5 bg-border/60"
+              className="h-5 bg-border/60"
             />
             <UserMenu user={user} />
           </div>

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -33,12 +34,17 @@ export default async function Page() {
 
       <header className="sticky top-0 z-40 border-b border-border/50 bg-background/70 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-2">
-            <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-xs">
-              P
-            </div>
+          <Link href="/" className="flex items-center gap-2 transition-opacity hover:opacity-90">
+            <Image
+              src="/logo.png"
+              alt="Projectly"
+              width={28}
+              height={28}
+              priority
+              className="size-7 rounded-md"
+            />
             <span className="text-sm font-semibold tracking-tight">Projectly</span>
-          </div>
+          </Link>
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
             <a href="#features" className="hover:text-foreground">Features</a>
             <a href="#workflow" className="hover:text-foreground">Workflow</a>
@@ -279,9 +285,13 @@ export default async function Page() {
       <footer className="relative border-t border-border/50">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:px-6">
           <div className="flex items-center gap-2">
-            <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground text-[10px] font-bold">
-              P
-            </div>
+            <Image
+              src="/logo.png"
+              alt="Projectly"
+              width={24}
+              height={24}
+              className="size-6 rounded-md"
+            />
             <span>Projectly © {new Date().getFullYear()}</span>
           </div>
           <div className="flex items-center gap-5">
