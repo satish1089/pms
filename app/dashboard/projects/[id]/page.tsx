@@ -2975,7 +2975,14 @@ export default function ProjectDetailPage() {
                         task={t}
                         mentionUsers={mentionUsersForTask(t._id)}
                         hashTasks={hashTasks}
-                        projectMembers={project.assignees}
+                        projectMembers={Array.from(
+                          new Map(
+                            [
+                              ...(t.assignees ?? []),
+                              ...(t.reportingPersons ?? []),
+                            ].map((u) => [u._id, u])
+                          ).values()
+                        )}
                         canEdit={canChangeTaskStatus(t)}
                         canManage={canEditTask(t)}
                         onSave={(next, subtaskMention) =>
