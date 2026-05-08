@@ -31,6 +31,7 @@ import {
   type TaskStatusKey,
   UserInitialsAvatar,
 } from "@/components/role-status-badge";
+import { RunningTimerCard } from "@/components/running-timer-card";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -227,6 +228,8 @@ export default function DashboardHome() {
             : "Loading…"}
         </div>
       </section>
+
+      <RunningTimerCard />
 
       <section
         className={cn(

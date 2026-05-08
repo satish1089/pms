@@ -104,6 +104,7 @@ import {
   PrioritySelect,
 } from "@/components/priority-badge";
 import { type UserLite as PickerUser } from "@/components/user-pickers";
+import { TaskTimerButton } from "@/components/task-timer-button";
 import {
   Tooltip,
   TooltipContent,
@@ -3208,7 +3209,7 @@ export default function ProjectDetailPage() {
                         </div>
                       </div>
 
-                      <div className="flex flex-col gap-1 border-b border-border/40 px-4 py-3 sm:px-6">
+                      <div className="flex flex-col gap-2 border-b border-border/40 px-4 py-3 sm:px-6">
                         <h2 className="break-words text-base font-semibold leading-snug">
                           {t.title}
                         </h2>
@@ -3217,6 +3218,11 @@ export default function ProjectDetailPage() {
                             {t.taskId}
                           </span>
                         )}
+                        <TaskTimerButton
+                          taskId={t._id}
+                          taskTitle={t.title}
+                          className="mt-1 w-full justify-center"
+                        />
                       </div>
 
                       <div>

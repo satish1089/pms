@@ -51,6 +51,7 @@ import {
   PrioritySelect,
 } from "@/components/priority-badge";
 import { DatePicker } from "@/components/ui/date-picker";
+import { TaskTimerButton } from "@/components/task-timer-button";
 import { type FieldErrors, parseApiError } from "@/lib/form-errors";
 import { type UserRole } from "@/lib/roles";
 
@@ -447,6 +448,11 @@ export default function TaskDetailPage() {
                   <span>· {task.project.name}</span>
                 </Link>
               )}
+              <TaskTimerButton
+                taskId={task._id}
+                taskTitle={task.title}
+                className="ml-auto"
+              />
             </div>
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
               {task.title}
