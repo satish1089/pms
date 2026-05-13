@@ -13,8 +13,10 @@ import { usePathname, useParams, useRouter, useSearchParams } from "next/navigat
 import {
   ArrowLeft,
   CalendarDays,
+  ChevronDown,
   ChevronLeft,
   Check,
+  Download,
   ClipboardList,
   Clock,
   FileText,
@@ -50,6 +52,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -117,6 +120,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -129,8 +140,15 @@ import {
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { type UserRole } from "@/lib/roles";
 import {
   type FieldErrors,
@@ -349,6 +367,7 @@ export default function ProjectDetailPage() {
     _id: string;
     user: UserLite | null;
     task: { _id: string; title: string; taskId?: string | null } | null;
+    manualTaskTitle?: string;
     date: string;
     startTime: string;
     endTime: string;
@@ -365,6 +384,19 @@ export default function ProjectDetailPage() {
   const [logTotalHours, setLogTotalHours] = useState(0);
   const [logTotalPages, setLogTotalPages] = useState(1);
   const [logTaskId, setLogTaskId] = useState<string>("project");
+  const [logTaskMode, setLogTaskMode] = useState<"existing" | "manual">(
+    "existing"
+  );
+  const [logManualTask, setLogManualTask] = useState<string>("");
+  const [logCreateTask, setLogCreateTask] = useState<boolean>(false);
+  type LogTaskOption = { _id: string; title: string; taskId?: string | null };
+  const [logTaskSelected, setLogTaskSelected] = useState<LogTaskOption | null>(
+    null
+  );
+  const [logTaskPopoverOpen, setLogTaskPopoverOpen] = useState(false);
+  const [logTaskQuery, setLogTaskQuery] = useState("");
+  const [logTaskOptions, setLogTaskOptions] = useState<LogTaskOption[]>([]);
+  const [logTaskSearching, setLogTaskSearching] = useState(false);
   const [logDate, setLogDate] = useState<Date | null>(new Date());
   const [logStartHour, setLogStartHour] = useState<string>("09");
   const [logStartMin, setLogStartMin] = useState<string>("00");
@@ -372,6 +404,22 @@ export default function ProjectDetailPage() {
   const [logEndMin, setLogEndMin] = useState<string>("00");
   const [logNote, setLogNote] = useState<string>("");
   const [logUserFilter, setLogUserFilter] = useState<string>("all");
+  const [logStartDate, setLogStartDate] = useState<Date | null>(null);
+  const [logEndDate, setLogEndDate] = useState<Date | null>(null);
+  const [logSearchInput, setLogSearchInput] = useState("");
+  const [logSearch, setLogSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setLogSearch(logSearchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [logSearchInput]);
+  type MemberOption = { _id: string; name: string; email?: string };
+  const [logUserSelected, setLogUserSelected] =
+    useState<MemberOption | null>(null);
+  const [logUserPopoverOpen, setLogUserPopoverOpen] = useState(false);
+  const [logUserQuery, setLogUserQuery] = useState("");
+  const [logUserOptions, setLogUserOptions] = useState<MemberOption[]>([]);
+  const [logUserSearching, setLogUserSearching] = useState(false);
+  const [logExporting, setLogExporting] = useState(false);
   const [logDialogOpen, setLogDialogOpen] = useState(false);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [pendingDeleteLog, setPendingDeleteLog] = useState<LogEntry | null>(null);
@@ -383,14 +431,96 @@ export default function ProjectDetailPage() {
     return diff > 0 ? +(diff / 60).toFixed(2) : 0;
   }, [logStartHour, logStartMin, logEndHour, logEndMin]);
 
+  useEffect(() => {
+    if (!logUserPopoverOpen || !project?._id) return;
+    const controller = new AbortController();
+    const t = setTimeout(async () => {
+      setLogUserSearching(true);
+      try {
+        const params = new URLSearchParams();
+        if (logUserQuery.trim()) params.set("q", logUserQuery.trim());
+        params.set("limit", "20");
+        const res = await fetch(
+          `/api/projects/${project._id}/members?${params.toString()}`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const opts: MemberOption[] = (data.users ?? []).map(
+          (u: { _id: string; name: string; email?: string }) => ({
+            _id: u._id,
+            name: u.name,
+            email: u.email,
+          })
+        );
+        setLogUserOptions(opts);
+      } catch {
+        // ignore
+      } finally {
+        setLogUserSearching(false);
+      }
+    }, 200);
+    return () => {
+      controller.abort();
+      clearTimeout(t);
+    };
+  }, [logUserPopoverOpen, logUserQuery, project?._id]);
+
+  useEffect(() => {
+    if (!logTaskPopoverOpen || !project?._id) return;
+    const controller = new AbortController();
+    const t = setTimeout(async () => {
+      setLogTaskSearching(true);
+      try {
+        const params = new URLSearchParams();
+        if (logTaskQuery.trim()) params.set("q", logTaskQuery.trim());
+        params.set("limit", "20");
+        const res = await fetch(
+          `/api/projects/${project._id}/tasks?${params.toString()}`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const opts: LogTaskOption[] = (data.tasks ?? []).map(
+          (t: { _id: string; title: string; taskId?: string | null }) => ({
+            _id: t._id,
+            title: t.title,
+            taskId: t.taskId ?? null,
+          })
+        );
+        setLogTaskOptions(opts);
+      } catch {
+        // ignore aborts/errors
+      } finally {
+        setLogTaskSearching(false);
+      }
+    }, 200);
+    return () => {
+      controller.abort();
+      clearTimeout(t);
+    };
+  }, [logTaskPopoverOpen, logTaskQuery, project?._id]);
+
+  const logsFetchingRef = useRef(false);
+
+  const buildLogQueryParams = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("limit", String(LOG_PAGE_SIZE));
+    if (logUserFilter !== "all") params.set("userId", logUserFilter);
+    if (logStartDate) params.set("startDate", logStartDate.toISOString());
+    if (logEndDate) params.set("endDate", logEndDate.toISOString());
+    if (logSearch) params.set("q", logSearch);
+    return params;
+  }, [logUserFilter, logStartDate, logEndDate, logSearch]);
+
   const fetchLogs = useCallback(async () => {
     if (!project?._id) return;
+    if (logsFetchingRef.current) return;
+    logsFetchingRef.current = true;
     setLogsLoading(true);
     try {
-      const params = new URLSearchParams();
-      params.set("page", String(logPage));
-      params.set("limit", String(LOG_PAGE_SIZE));
-      if (logUserFilter !== "all") params.set("userId", logUserFilter);
+      const params = buildLogQueryParams();
+      params.set("page", "1");
       const res = await fetch(
         `/api/projects/${project._id}/logs?${params.toString()}`,
         { cache: "no-store" }
@@ -401,17 +531,67 @@ export default function ProjectDetailPage() {
       setLogTotal(data.total ?? 0);
       setLogTotalHours(data.totalHours ?? 0);
       setLogTotalPages(data.totalPages ?? 1);
+      setLogPage(1);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load logs";
       toast.error(msg);
     } finally {
       setLogsLoading(false);
+      logsFetchingRef.current = false;
     }
-  }, [project?._id, logPage, logUserFilter]);
+  }, [project?._id, buildLogQueryParams]);
+
+  const loadMoreLogs = useCallback(async () => {
+    if (!project?._id) return;
+    if (logsFetchingRef.current) return;
+    if (logs.length >= logTotal) return;
+    const nextPage = logPage + 1;
+    logsFetchingRef.current = true;
+    setLogsLoading(true);
+    try {
+      const params = buildLogQueryParams();
+      params.set("page", String(nextPage));
+      const res = await fetch(
+        `/api/projects/${project._id}/logs?${params.toString()}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) throw new Error("Failed to load logs");
+      const data = await res.json();
+      setLogs((prev) => [...prev, ...((data.logs as LogEntry[]) ?? [])]);
+      setLogPage(nextPage);
+      setLogTotal(data.total ?? 0);
+      setLogTotalHours(data.totalHours ?? 0);
+      setLogTotalPages(data.totalPages ?? 1);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load logs";
+      toast.error(msg);
+    } finally {
+      setLogsLoading(false);
+      logsFetchingRef.current = false;
+    }
+  }, [project?._id, buildLogQueryParams, logs.length, logTotal, logPage]);
 
   useEffect(() => {
     if (tab === "logs") fetchLogs();
   }, [tab, fetchLogs]);
+
+  const logsSentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (tab !== "logs") return;
+    const el = logsSentinelRef.current;
+    if (!el) return;
+    if (logs.length >= logTotal) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          loadMoreLogs();
+        }
+      },
+      { rootMargin: "200px 0px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [tab, logs.length, logTotal, loadMoreLogs]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<TaskStatusKey | null>(null);
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
@@ -2413,89 +2593,380 @@ export default function ProjectDetailPage() {
             className="flex flex-1 flex-col lg:min-h-0"
           >
             {(() => {
-              const userOptions = isAdmin
-                ? Array.from(
-                    new Map(
-                      [
-                        ...(project.assignees ?? []),
-                        ...(project.reportingTo ?? []),
-                      ].map((u) => [u._id, { id: u._id, name: u.name }]),
-                    ).values(),
-                  )
-                : [];
-
               return (
                 <div className="flex flex-1 flex-col lg:min-h-0">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 px-4 py-2 shrink-0 sm:px-6">
-                    <div className="flex items-center gap-2">
-                      <Clock className="size-4 text-muted-foreground" />
-                      <h2 className="text-sm font-semibold">Logs</h2>
-                      <span className="rounded-full border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        {logsLoading ? "…" : logTotal}
+                  <div className="flex flex-wrap items-center gap-3 border-b border-border/40 px-4 py-2 shrink-0 sm:px-6">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <h2 className="inline-flex items-center gap-2 text-sm font-semibold leading-none">
+                        <Clock className="size-4 text-muted-foreground" />
+                        Logs
+                      </h2>
+                      <span className="inline-flex h-6 items-center rounded-full border bg-muted/40 px-2 text-[11px] font-medium tabular-nums text-muted-foreground">
+                        {logsLoading
+                          ? "…"
+                          : `${logTotal} ${logTotal === 1 ? "entry" : "entries"}`}
                       </span>
-                      <span className="hidden text-xs text-muted-foreground sm:inline">
-                        · {logTotalHours}h total
+                      <span className="inline-flex h-6 items-center rounded-full border border-primary/30 bg-primary/10 px-2 text-[11px] font-semibold tabular-nums text-primary">
+                        {logsLoading
+                          ? "…"
+                          : `${(Math.round(logTotalHours * 100) / 100)
+                              .toString()
+                              .replace(/\.?0+$/, "")}h`}
                       </span>
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setEditingLogId(null);
-                        setLogTaskId("project");
-                        setLogDate(new Date());
-                        setLogStartHour("09");
-                        setLogStartMin("00");
-                        setLogEndHour("10");
-                        setLogEndMin("00");
-                        setLogNote("");
-                        setLogDialogOpen(true);
-                      }}
-                    >
-                      <Plus className="mr-2 size-4" /> Add log
-                    </Button>
-                  </div>
-
-                  {(isAdmin || logTotal > 0) && (
-                    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/40 px-4 py-2 sm:px-6">
+                    <div className="ml-auto flex flex-wrap items-center gap-2">
+                      <InputGroup className="h-8 w-56 shadow-xs">
+                        <InputGroupAddon>
+                          <Search className="size-3.5 text-muted-foreground" />
+                        </InputGroupAddon>
+                        <InputGroupInput
+                          placeholder="Search task or note"
+                          value={logSearchInput}
+                          onChange={(e) => {
+                            setLogSearchInput(e.target.value);
+                            setLogPage(1);
+                          }}
+                          className="text-sm"
+                        />
+                        {logSearchInput && (
+                          <InputGroupAddon align="inline-end">
+                            <InputGroupButton
+                              size="icon-xs"
+                              aria-label="Clear search"
+                              onClick={() => {
+                                setLogSearchInput("");
+                                setLogPage(1);
+                              }}
+                            >
+                              <X />
+                            </InputGroupButton>
+                          </InputGroupAddon>
+                        )}
+                      </InputGroup>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex h-8 max-w-[260px] items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50"
+                          >
+                            <CalendarDays className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">
+                              {logStartDate || logEndDate ? (
+                                <>
+                                  {logStartDate
+                                    ? formatShortDate(
+                                        logStartDate.toISOString()
+                                      )
+                                    : "…"}
+                                  {" → "}
+                                  {logEndDate
+                                    ? formatShortDate(
+                                        logEndDate.toISOString()
+                                      )
+                                    : "…"}
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  Date range
+                                </span>
+                              )}
+                            </span>
+                            {logStartDate || logEndDate ? (
+                              <span
+                                role="button"
+                                aria-label="Clear date range"
+                                className="ml-0.5 inline-flex size-4 items-center justify-center rounded hover:bg-muted"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setLogStartDate(null);
+                                  setLogEndDate(null);
+                                  setLogPage(1);
+                                }}
+                              >
+                                <X className="size-3" />
+                              </span>
+                            ) : (
+                              <ChevronDown className="ml-0.5 size-3.5 shrink-0 opacity-60" />
+                            )}
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="w-auto space-y-3 p-3"
+                          align="end"
+                        >
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="grid gap-1.5">
+                              <Label className="text-xs">Start date</Label>
+                              <DatePicker
+                                value={logStartDate}
+                                onChange={(d) => {
+                                  setLogStartDate(d);
+                                  setLogPage(1);
+                                }}
+                                placeholder="Pick start"
+                              />
+                            </div>
+                            <div className="grid gap-1.5">
+                              <Label className="text-xs">End date</Label>
+                              <DatePicker
+                                value={logEndDate}
+                                onChange={(d) => {
+                                  setLogEndDate(d);
+                                  setLogPage(1);
+                                }}
+                                placeholder="Pick end"
+                              />
+                            </div>
+                          </div>
+                          {(logStartDate || logEndDate) && (
+                            <div className="flex justify-end">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setLogStartDate(null);
+                                  setLogEndDate(null);
+                                  setLogPage(1);
+                                }}
+                                className="h-7 text-xs"
+                              >
+                                Clear
+                              </Button>
+                            </div>
+                          )}
+                        </PopoverContent>
+                      </Popover>
                       {isAdmin && (
-                        <Select
-                          value={logUserFilter}
-                          onValueChange={(v) => {
-                            setLogUserFilter(v);
-                            setLogPage(1);
-                          }}
+                        <Popover
+                          open={logUserPopoverOpen}
+                          onOpenChange={setLogUserPopoverOpen}
                         >
-                          <SelectTrigger size="sm" className="h-8 w-44 shadow-none">
-                            <SelectValue placeholder="All users" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All users</SelectItem>
-                            {userOptions.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              role="combobox"
+                              aria-expanded={logUserPopoverOpen}
+                              className="flex h-8 max-w-[200px] items-center gap-1.5 rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50"
+                              data-state={
+                                logUserPopoverOpen ? "open" : "closed"
+                              }
+                            >
+                              <UsersIcon className="size-3.5 shrink-0" />
+                              <span className="truncate">
+                                {logUserFilter === "all" || !logUserSelected
+                                  ? "All users"
+                                  : logUserSelected.name}
+                              </span>
+                              {logUserFilter !== "all" ? (
+                                <span
+                                  role="button"
+                                  aria-label="Clear user filter"
+                                  className="ml-0.5 inline-flex size-4 items-center justify-center rounded hover:bg-muted"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setLogUserFilter("all");
+                                    setLogUserSelected(null);
+                                    setLogPage(1);
+                                  }}
+                                >
+                                  <X className="size-3" />
+                                </span>
+                              ) : (
+                                <ChevronDown className="ml-0.5 size-3.5 shrink-0 opacity-60" />
+                              )}
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-64 p-0"
+                            align="end"
+                          >
+                            <Command shouldFilter={false}>
+                              <CommandInput
+                                placeholder="Search users…"
+                                value={logUserQuery}
+                                onValueChange={setLogUserQuery}
+                              />
+                              <CommandList>
+                                {logUserSearching ? (
+                                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                                    Searching…
+                                  </div>
+                                ) : (
+                                  <CommandEmpty>No users found.</CommandEmpty>
+                                )}
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="__all__"
+                                    onSelect={() => {
+                                      setLogUserFilter("all");
+                                      setLogUserSelected(null);
+                                      setLogPage(1);
+                                      setLogUserPopoverOpen(false);
+                                    }}
+                                  >
+                                    <Check
+                                      className={`mr-2 size-4 ${
+                                        logUserFilter === "all"
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                      }`}
+                                    />
+                                    All users
+                                  </CommandItem>
+                                  {logUserOptions.map((u) => (
+                                    <CommandItem
+                                      key={u._id}
+                                      value={u._id}
+                                      onSelect={() => {
+                                        setLogUserFilter(u._id);
+                                        setLogUserSelected(u);
+                                        setLogPage(1);
+                                        setLogUserPopoverOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={`mr-2 size-4 ${
+                                          logUserFilter === u._id
+                                            ? "opacity-100"
+                                            : "opacity-0"
+                                        }`}
+                                      />
+                                      <div className="flex min-w-0 flex-col">
+                                        <span className="truncate">
+                                          {u.name}
+                                        </span>
+                                        {u.email && (
+                                          <span className="truncate text-xs text-muted-foreground">
+                                            {u.email}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                       )}
-                      {isAdmin && logUserFilter !== "all" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setLogUserFilter("all");
-                            setLogPage(1);
-                          }}
-                          className="h-8 text-muted-foreground hover:text-foreground"
-                        >
-                          <X className="mr-1 size-3.5" /> Clear
-                        </Button>
-                      )}
-                      <span className="ml-auto text-[11px] text-muted-foreground">
-                        {logTotal} of {logTotal}
-                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={logExporting || logTotal === 0}
+                        onClick={async () => {
+                          if (!project?._id) return;
+                          setLogExporting(true);
+                          try {
+                            const params = new URLSearchParams();
+                            if (isAdmin && logUserFilter !== "all")
+                              params.set("userId", logUserFilter);
+                            if (logStartDate)
+                              params.set(
+                                "startDate",
+                                logStartDate.toISOString()
+                              );
+                            if (logEndDate)
+                              params.set("endDate", logEndDate.toISOString());
+                            if (logSearch) params.set("q", logSearch);
+                            const res = await fetch(
+                              `/api/projects/${project._id}/logs/export?${params.toString()}`,
+                              { cache: "no-store" }
+                            );
+                            if (!res.ok) {
+                              const data = await res
+                                .json()
+                                .catch(() => ({}));
+                              throw new Error(
+                                data.error ?? "Failed to export"
+                              );
+                            }
+                            const blob = await res.blob();
+                            const filename =
+                              res.headers
+                                .get("Content-Disposition")
+                                ?.match(/filename="?([^"]+)"?/)?.[1] ??
+                              `time-logs-${new Date()
+                                .toISOString()
+                                .slice(0, 10)}.csv`;
+                            const blobUrl =
+                              URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = blobUrl;
+                            a.download = filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            URL.revokeObjectURL(blobUrl);
+                          } catch (err) {
+                            const msg =
+                              err instanceof Error
+                                ? err.message
+                                : "Failed to export";
+                            toast.error(msg);
+                          } finally {
+                            setLogExporting(false);
+                          }
+                        }}
+                      >
+                        <Download className="mr-2 size-4" />
+                        {logExporting ? "Exporting…" : "Export CSV"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          setEditingLogId(null);
+                          setLogTaskId("project");
+                          setLogTaskSelected(null);
+                          setLogTaskQuery("");
+                          setLogTaskOptions([]);
+                          setLogTaskMode("existing");
+                          setLogManualTask("");
+                          setLogCreateTask(false);
+                          setLogDate(new Date());
+                          setLogStartHour("09");
+                          setLogStartMin("00");
+                          setLogEndHour("10");
+                          setLogEndMin("00");
+                          setLogNote("");
+                          setLogDialogOpen(true);
+                          if (sessionUserId && project?._id) {
+                            try {
+                              const params = new URLSearchParams();
+                              params.set("page", "1");
+                              params.set("limit", "1");
+                              params.set("userId", sessionUserId);
+                              const res = await fetch(
+                                `/api/projects/${project._id}/logs?${params.toString()}`,
+                                { cache: "no-store" }
+                              );
+                              if (!res.ok) return;
+                              const data = await res.json();
+                              const last = (data.logs ?? [])[0] as
+                                | LogEntry
+                                | undefined;
+                              if (!last) return;
+                              if (last.task) {
+                                setLogTaskMode("existing");
+                                setLogTaskId(last.task._id);
+                                setLogTaskSelected({
+                                  _id: last.task._id,
+                                  title: last.task.title,
+                                  taskId: last.task.taskId ?? null,
+                                });
+                              } else if (last.manualTaskTitle) {
+                                setLogTaskMode("manual");
+                                setLogManualTask(last.manualTaskTitle);
+                              }
+                            } catch {
+                              // ignore
+                            }
+                          }
+                        }}
+                      >
+                        <Plus className="mr-2 size-4" /> Add log
+                      </Button>
                     </div>
-                  )}
+                  </div>
 
                   <div className="flex flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                     <div className="md:flex-1 md:overflow-auto">
@@ -2590,13 +3061,13 @@ export default function ProjectDetailPage() {
                                 </TableCell>
                                 <TableCell className="px-3 py-2.5 align-top text-sm">
                                   {l.task ? (
+                                    <span>{l.task.title}</span>
+                                  ) : l.manualTaskTitle ? (
                                     <span className="inline-flex items-center gap-1.5">
-                                      {l.task.taskId && (
-                                        <span className="font-mono text-xs text-muted-foreground">
-                                          {l.task.taskId}
-                                        </span>
-                                      )}
-                                      <span>{l.task.title}</span>
+                                      <span>{l.manualTaskTitle}</span>
+                                      <span className="rounded border px-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                        manual
+                                      </span>
                                     </span>
                                   ) : (
                                     <span className="text-muted-foreground">
@@ -2633,6 +3104,29 @@ export default function ProjectDetailPage() {
                                         onClick={() => {
                                           setEditingLogId(l._id);
                                           setLogTaskId(l.task?._id ?? "project");
+                                          setLogTaskSelected(
+                                            l.task
+                                              ? {
+                                                  _id: l.task._id,
+                                                  title: l.task.title,
+                                                  taskId:
+                                                    l.task.taskId ?? null,
+                                                }
+                                              : null
+                                          );
+                                          setLogTaskQuery("");
+                                          setLogTaskOptions([]);
+                                          if (l.task) {
+                                            setLogTaskMode("existing");
+                                            setLogManualTask("");
+                                          } else if (l.manualTaskTitle) {
+                                            setLogTaskMode("manual");
+                                            setLogManualTask(l.manualTaskTitle);
+                                          } else {
+                                            setLogTaskMode("existing");
+                                            setLogManualTask("");
+                                          }
+                                          setLogCreateTask(false);
                                           setLogDate(new Date(l.date));
                                           const [sh, sm] = l.startTime.split(":");
                                           const [eh, em] = l.endTime.split(":");
@@ -2666,37 +3160,17 @@ export default function ProjectDetailPage() {
                       </Table>
                     </div>
 
-                    {logTotal > LOG_PAGE_SIZE && (
-                      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/40 px-4 py-3 sm:px-6">
-                        <span className="text-xs text-muted-foreground">
-                          Showing {(logPage - 1) * LOG_PAGE_SIZE + 1}-
-                          {Math.min(logPage * LOG_PAGE_SIZE, logTotal)} of {logTotal}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setLogPage((p) => Math.max(1, p - 1))}
-                            disabled={logPage === 1 || logsLoading}
-                          >
-                            Prev
-                          </Button>
-                          <span className="text-xs text-muted-foreground">
-                            Page {logPage} / {logTotalPages}
-                          </span>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              setLogPage((p) => Math.min(logTotalPages, p + 1))
-                            }
-                            disabled={logPage >= logTotalPages || logsLoading}
-                          >
-                            Next
-                          </Button>
-                        </div>
+                    {logs.length < logTotal && (
+                      <div
+                        ref={logsSentinelRef}
+                        className="flex shrink-0 items-center justify-center border-t border-border/40 px-4 py-3 text-xs text-muted-foreground sm:px-6"
+                      >
+                        {logsLoading ? "Loading…" : "Scroll to load more"}
+                      </div>
+                    )}
+                    {logs.length > 0 && logs.length >= logTotal && (
+                      <div className="flex shrink-0 items-center justify-center border-t border-border/40 px-4 py-3 text-xs text-muted-foreground sm:px-6">
+                        End of logs · {logTotal} total
                       </div>
                     )}
                   </div>
@@ -2708,7 +3182,7 @@ export default function ProjectDetailPage() {
                       if (!open) setEditingLogId(null);
                     }}
                   >
-                    <DialogContent className="sm:max-w-[640px]">
+                    <DialogContent className="sm:max-w-xl">
                       <DialogHeader>
                         <DialogTitle>
                           {editingLogId ? "Edit time log" : "Add time log"}
@@ -2719,24 +3193,191 @@ export default function ProjectDetailPage() {
                             : "Record hours worked on the project or a specific task."}
                         </DialogDescription>
                       </DialogHeader>
-                      <div className="grid gap-4 py-2">
+                      <div className="space-y-4 py-2">
                         <div className="grid gap-1.5">
                           <Label>Task</Label>
-                          <Select value={logTaskId} onValueChange={setLogTaskId}>
-                            <SelectTrigger className="h-9 w-full shadow-none">
-                              <SelectValue placeholder="Pick task" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="project">Project (general)</SelectItem>
-                              {tasks.map((t) => (
-                                <SelectItem key={t._id} value={t._id}>
-                                  {t.title}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <InputGroup>
+                            <InputGroupAddon
+                              align="inline-start"
+                              className="h-full self-stretch border-r border-input py-0 pr-3"
+                            >
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <InputGroupButton
+                                    variant="ghost"
+                                    size="sm"
+                                    className="gap-1.5 font-medium hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
+                                  >
+                                    {logTaskMode === "existing"
+                                      ? "Existing"
+                                      : "Manual"}
+                                    <ChevronDown className="size-3.5 opacity-60" />
+                                  </InputGroupButton>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start">
+                                  <DropdownMenuItem
+                                    onSelect={() => setLogTaskMode("existing")}
+                                  >
+                                    <Check
+                                      className={`mr-2 size-4 ${
+                                        logTaskMode === "existing"
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                      }`}
+                                    />
+                                    Pick existing
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onSelect={() => setLogTaskMode("manual")}
+                                  >
+                                    <Check
+                                      className={`mr-2 size-4 ${
+                                        logTaskMode === "manual"
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                      }`}
+                                    />
+                                    Enter manually
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </InputGroupAddon>
+                            {logTaskMode === "existing" ? (
+                              <Popover
+                                open={logTaskPopoverOpen}
+                                onOpenChange={setLogTaskPopoverOpen}
+                              >
+                                <PopoverTrigger asChild>
+                                  <button
+                                    type="button"
+                                    role="combobox"
+                                    aria-expanded={logTaskPopoverOpen}
+                                    data-slot="input-group-control"
+                                    data-state={
+                                      logTaskPopoverOpen ? "open" : "closed"
+                                    }
+                                    className="flex h-full flex-1 items-center justify-between gap-2 bg-transparent pl-3 pr-3 text-sm outline-none"
+                                  >
+                                    <span className="truncate text-left">
+                                      {logTaskId === "project" ||
+                                      !logTaskSelected ? (
+                                        <span className="text-muted-foreground">
+                                          Project (general)
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1.5">
+                                          {logTaskSelected.taskId && (
+                                            <span className="font-mono text-xs text-muted-foreground">
+                                              {logTaskSelected.taskId}
+                                            </span>
+                                          )}
+                                          <span>{logTaskSelected.title}</span>
+                                        </span>
+                                      )}
+                                    </span>
+                                    <ChevronDown className="size-4 shrink-0 opacity-50" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  className="w-[--radix-popover-trigger-width] p-0"
+                                  align="start"
+                                >
+                                  <Command shouldFilter={false}>
+                                    <CommandInput
+                                      placeholder="Search tasks…"
+                                      value={logTaskQuery}
+                                      onValueChange={setLogTaskQuery}
+                                    />
+                                    <CommandList>
+                                      {logTaskSearching ? (
+                                        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                                          Searching…
+                                        </div>
+                                      ) : (
+                                        <CommandEmpty>
+                                          No tasks found.
+                                        </CommandEmpty>
+                                      )}
+                                      <CommandGroup>
+                                        <CommandItem
+                                          value="__project__"
+                                          onSelect={() => {
+                                            setLogTaskId("project");
+                                            setLogTaskSelected(null);
+                                            setLogTaskPopoverOpen(false);
+                                          }}
+                                        >
+                                          <Check
+                                            className={`mr-2 size-4 ${
+                                              logTaskId === "project"
+                                                ? "opacity-100"
+                                                : "opacity-0"
+                                            }`}
+                                          />
+                                          Project (general)
+                                        </CommandItem>
+                                        {logTaskOptions.map((opt) => (
+                                          <CommandItem
+                                            key={opt._id}
+                                            value={opt._id}
+                                            onSelect={() => {
+                                              setLogTaskId(opt._id);
+                                              setLogTaskSelected(opt);
+                                              setLogTaskPopoverOpen(false);
+                                            }}
+                                          >
+                                            <Check
+                                              className={`mr-2 size-4 ${
+                                                logTaskId === opt._id
+                                                  ? "opacity-100"
+                                                  : "opacity-0"
+                                              }`}
+                                            />
+                                            <span className="inline-flex min-w-0 items-center gap-1.5">
+                                              {opt.taskId && (
+                                                <span className="font-mono text-xs text-muted-foreground">
+                                                  {opt.taskId}
+                                                </span>
+                                              )}
+                                              <span className="truncate">
+                                                {opt.title}
+                                              </span>
+                                            </span>
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            ) : (
+                              <InputGroupInput
+                                value={logManualTask}
+                                onChange={(e) =>
+                                  setLogManualTask(e.target.value)
+                                }
+                                placeholder="Type task title"
+                                maxLength={200}
+                              />
+                            )}
+                          </InputGroup>
+                          {logTaskMode === "manual" && (
+                            <label className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                              <Checkbox
+                                checked={logCreateTask}
+                                onCheckedChange={(v) =>
+                                  setLogCreateTask(Boolean(v))
+                                }
+                                disabled={Boolean(editingLogId)}
+                              />
+                              <span>
+                                Create as task in Tasks tab (you become reporter
+                                and assignee)
+                              </span>
+                            </label>
+                          )}
                         </div>
-                        <div className="grid grid-cols-[1fr_1fr_1fr_90px] gap-3">
+                        <div className="grid grid-cols-[1fr_1fr_1fr_110px] gap-4">
                           <div className="grid gap-1.5">
                             <Label>Date</Label>
                             <DatePicker
@@ -2815,9 +3456,53 @@ export default function ProjectDetailPage() {
                               toast.error("End time must be after start time");
                               return;
                             }
+                            const manualTitle = logManualTask.trim();
+                            if (logTaskMode === "manual" && !manualTitle) {
+                              toast.error("Enter task title");
+                              return;
+                            }
                             setLogsSubmitting(true);
                             try {
                               const isEdit = Boolean(editingLogId);
+                              let taskPayload: string | null = null;
+                              let manualPayload = "";
+                              if (logTaskMode === "existing") {
+                                taskPayload =
+                                  logTaskId === "project" ? null : logTaskId;
+                              } else if (
+                                logCreateTask &&
+                                !isEdit &&
+                                sessionUserId
+                              ) {
+                                const taskRes = await fetch(
+                                  `/api/projects/${project._id}/tasks`,
+                                  {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                      title: manualTitle,
+                                      assignees: [sessionUserId],
+                                      reportingPersons: [sessionUserId],
+                                    }),
+                                  }
+                                );
+                                if (!taskRes.ok) {
+                                  const data = await taskRes
+                                    .json()
+                                    .catch(() => ({}));
+                                  throw new Error(
+                                    data.error ?? "Failed to create task"
+                                  );
+                                }
+                                const tData = await taskRes.json();
+                                taskPayload = tData?.task?._id ?? null;
+                                await loadTasks();
+                              } else {
+                                taskPayload = null;
+                                manualPayload = manualTitle;
+                              }
                               const res = await fetch(
                                 isEdit
                                   ? `/api/logs/${editingLogId}`
@@ -2826,7 +3511,8 @@ export default function ProjectDetailPage() {
                                   method: isEdit ? "PATCH" : "POST",
                                   headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({
-                                    task: logTaskId === "project" ? null : logTaskId,
+                                    task: taskPayload,
+                                    manualTaskTitle: manualPayload,
                                     date: logDate.toISOString(),
                                     startTime: `${logStartHour}:${logStartMin}`,
                                     endTime: `${logEndHour}:${logEndMin}`,
@@ -2841,6 +3527,9 @@ export default function ProjectDetailPage() {
                                 );
                               }
                               setLogNote("");
+                              setLogManualTask("");
+                              setLogCreateTask(false);
+                              setLogTaskMode("existing");
                               setLogDialogOpen(false);
                               setEditingLogId(null);
                               toast.success(isEdit ? "Log updated" : "Log added");
@@ -4414,11 +5103,16 @@ function AssigneeAvatarRow({
     };
   }, [pickerOpen, query, existingIds]);
 
+  const MAX_VISIBLE = 6;
+  const visibleUsers = users.slice(0, MAX_VISIBLE);
+  const overflowUsers = users.slice(MAX_VISIBLE);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+
   return (
-    <div className="flex items-center">
+    <div className="flex min-w-0 flex-wrap items-center gap-y-2">
       <TooltipProvider delayDuration={150}>
-        <div className="flex items-center -space-x-2">
-          {users.map((u) => (
+        <div className="flex min-w-0 items-center -space-x-2">
+          {visibleUsers.map((u) => (
             <Tooltip key={u._id}>
               <TooltipTrigger asChild>
                 <div className="relative z-0 hover:z-20">
@@ -4466,6 +5160,56 @@ function AssigneeAvatarRow({
               </TooltipContent>
             </Tooltip>
           ))}
+          {overflowUsers.length > 0 && (
+            <Popover open={overflowOpen} onOpenChange={setOverflowOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Show ${overflowUsers.length} more`}
+                  className="relative z-0 flex size-8 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-semibold text-foreground transition-all hover:z-20 hover:bg-muted/80"
+                >
+                  +{overflowUsers.length}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-1" align="end">
+                <div className="max-h-72 overflow-auto">
+                  {overflowUsers.map((u) => (
+                    <div
+                      key={u._id}
+                      className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40"
+                    >
+                      <span
+                        className={cn(
+                          "flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                          colorForRole(u.role)
+                        )}
+                      >
+                        {initialsOf(u.name)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">
+                          {u.name}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {u.email}
+                        </div>
+                      </div>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          aria-label={`Remove ${u.name}`}
+                          onClick={() => setConfirmUser(u)}
+                          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
       </TooltipProvider>
 

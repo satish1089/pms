@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import TimeLog from "@/models/TimeLog";
+import Task from "@/models/Task";
 import { getSession } from "@/lib/auth";
 
 function escapeRegex(s: string) {
@@ -67,7 +68,16 @@ export async function GET(req: NextRequest) {
     }
 
     if (q) {
-      filter.note = new RegExp(escapeRegex(q), "i");
+      const rx = new RegExp(escapeRegex(q), "i");
+      const matchedTasks = await Task.find({ title: rx })
+        .select("_id")
+        .lean();
+      const taskIds = matchedTasks.map((t) => t._id);
+      filter.$or = [
+        { note: rx },
+        { manualTaskTitle: rx },
+        ...(taskIds.length > 0 ? [{ task: { $in: taskIds } }] : []),
+      ];
     }
 
     const [logs, total, totalHoursAgg] = await Promise.all([

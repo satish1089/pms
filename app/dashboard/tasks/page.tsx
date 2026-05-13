@@ -549,17 +549,15 @@ export default function TasksPage() {
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Tasks</h1>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-semibold">
             {isUser ? "My tasks" : "All tasks"}
           </h2>
           <span className="rounded-full border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
             {loading ? "…" : `${total} total`}
           </span>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <div className="inline-flex overflow-hidden rounded-md border bg-background">
+          <div className="ml-auto inline-flex overflow-hidden rounded-md border bg-background sm:ml-0">
             <button
               type="button"
               onClick={() => setView("board")}
@@ -585,7 +583,11 @@ export default function TasksPage() {
               <ListIcon className="size-3.5" /> List
             </button>
           </div>
-          <InputGroup className={`h-9 sm:w-72 ${controlClasses}`}>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:flex-wrap lg:items-center">
+          <InputGroup
+            className={`col-span-2 h-9 sm:col-span-4 lg:w-72 ${controlClasses}`}
+          >
             <InputGroupAddon>
               <Search className="text-muted-foreground" />
             </InputGroupAddon>
@@ -607,7 +609,9 @@ export default function TasksPage() {
             )}
           </InputGroup>
           <Select value={projectFilter} onValueChange={setProjectFilter}>
-            <SelectTrigger className={`w-full sm:w-48 ${controlClasses}`}>
+            <SelectTrigger
+              className={`col-span-2 w-full sm:col-span-2 lg:w-48 ${controlClasses}`}
+            >
               <SelectValue placeholder="All projects" />
             </SelectTrigger>
             <SelectContent>
@@ -624,7 +628,9 @@ export default function TasksPage() {
               value={statusFilter}
               onValueChange={(v) => setStatusFilter(v as "all" | TaskStatusKey)}
             >
-              <SelectTrigger className={`w-full sm:w-40 ${controlClasses}`}>
+              <SelectTrigger
+                className={`col-span-2 w-full sm:col-span-2 lg:w-40 ${controlClasses}`}
+              >
                 <SelectValue placeholder="All status" />
               </SelectTrigger>
               <SelectContent>
@@ -642,7 +648,9 @@ export default function TasksPage() {
               setPriorityFilter(v as "all" | TaskPriorityKey)
             }
           >
-            <SelectTrigger className={`w-full sm:w-40 ${controlClasses}`}>
+            <SelectTrigger
+              className={`w-full sm:col-span-2 lg:w-40 ${controlClasses}`}
+            >
               <SelectValue placeholder="All priority" />
             </SelectTrigger>
             <SelectContent>
@@ -657,7 +665,9 @@ export default function TasksPage() {
             value={typeFilter}
             onValueChange={(v) => setTypeFilter(v as "all" | TaskTypeKey)}
           >
-            <SelectTrigger className={`w-full sm:w-36 ${controlClasses}`}>
+            <SelectTrigger
+              className={`w-full sm:col-span-2 lg:w-36 ${controlClasses}`}
+            >
               <SelectValue placeholder="All types" />
             </SelectTrigger>
             <SelectContent>
@@ -675,7 +685,7 @@ export default function TasksPage() {
                 variant="outline"
                 role="combobox"
                 aria-expanded={tagFilterOpen}
-                className={`h-9 w-full justify-between font-normal sm:w-36 ${controlClasses} ${tagFilter ? "" : "text-muted-foreground"}`}
+                className={`col-span-2 h-9 w-full justify-between font-normal sm:col-span-4 lg:w-36 ${controlClasses} ${tagFilter ? "" : "text-muted-foreground"}`}
               >
                 <span className="truncate">{tagFilter || "All tags"}</span>
                 <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
@@ -724,7 +734,7 @@ export default function TasksPage() {
               variant="ghost"
               size="sm"
               onClick={clearFilters}
-              className="h-9 text-muted-foreground hover:text-foreground"
+              className="col-span-2 h-9 text-muted-foreground hover:text-foreground sm:col-span-4 lg:col-auto lg:ml-auto"
             >
               <X className="mr-1 size-4" /> Clear
             </Button>

@@ -19,6 +19,7 @@ const createSchema = z.object({
     .nullable()
     .optional()
     .transform((v) => (v === undefined ? null : v)),
+  manualTaskTitle: z.string().max(200).optional().default(""),
   date: z.string().min(1),
   startTime: z.string().regex(TIME_RE, "Invalid start time"),
   endTime: z.string().regex(TIME_RE, "Invalid end time"),
@@ -52,6 +53,9 @@ export async function GET(
       Math.max(1, parseInt(url.searchParams.get("limit") ?? "10", 10) || 10)
     );
     const userParam = url.searchParams.get("userId");
+    const startParam = url.searchParams.get("startDate");
+    const endParam = url.searchParams.get("endDate");
+    const q = url.searchParams.get("q")?.trim() ?? "";
 
     const isManager = canManageProject(session);
     const filter: Record<string, unknown> = { project: project._id };
@@ -64,6 +68,39 @@ export async function GET(
       }
     } else {
       filter.user = new mongoose.Types.ObjectId(session.sub);
+    }
+
+    if (startParam || endParam) {
+      const range: Record<string, Date> = {};
+      if (startParam) {
+        const d = new Date(startParam);
+        if (Number.isNaN(d.getTime()))
+          return NextResponse.json({ error: "Invalid startDate" }, { status: 400 });
+        d.setHours(0, 0, 0, 0);
+        range.$gte = d;
+      }
+      if (endParam) {
+        const d = new Date(endParam);
+        if (Number.isNaN(d.getTime()))
+          return NextResponse.json({ error: "Invalid endDate" }, { status: 400 });
+        d.setHours(23, 59, 59, 999);
+        range.$lte = d;
+      }
+      filter.date = range;
+    }
+
+    if (q) {
+      const safe = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const rx = new RegExp(safe, "i");
+      const matched = await Task.find({ project: project._id, title: rx })
+        .select("_id")
+        .lean();
+      const taskIds = matched.map((t) => t._id);
+      filter.$or = [
+        { note: rx },
+        { manualTaskTitle: rx },
+        ...(taskIds.length > 0 ? [{ task: { $in: taskIds } }] : []),
+      ];
     }
 
     const total = await TimeLog.countDocuments(filter);
@@ -146,6 +183,7 @@ export async function POST(
       project: project._id,
       user: new mongoose.Types.ObjectId(session.sub),
       task: taskRef,
+      manualTaskTitle: taskRef ? "" : parsed.data.manualTaskTitle.trim(),
       date,
       startTime: parsed.data.startTime,
       endTime: parsed.data.endTime,

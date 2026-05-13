@@ -54,7 +54,7 @@ function isValidId(id: string) {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getSession();
@@ -65,6 +65,13 @@ export async function GET(
     await connectDB();
     const project = await getProjectForSession(id, session);
     if (!project) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const url = new URL(req.url);
+    const q = url.searchParams.get("q")?.trim() ?? "";
+    const limitParam = parseInt(url.searchParams.get("limit") ?? "0", 10);
+    const limit = Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(50, limitParam)
+      : 0;
 
     const missing = await Task.collection
       .find(
@@ -89,8 +96,16 @@ export async function GET(
       );
     }
 
-    const tasks = await Task.find({ project: project._id })
-      .sort({ createdAt: -1 })
+    const filter: Record<string, unknown> = { project: project._id };
+    if (q) {
+      const safe = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const rx = new RegExp(safe, "i");
+      filter.$or = [{ title: rx }, { taskId: rx }];
+    }
+
+    let query = Task.find(filter).sort({ createdAt: -1 });
+    if (limit > 0) query = query.limit(limit);
+    const tasks = await query
       .populate("createdBy", "name email role")
       .populate("assignees", "name email role")
       .populate("reportingPersons", "name email role")

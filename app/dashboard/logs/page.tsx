@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Clock,
+  Download,
   Search,
   X,
 } from "lucide-react";
@@ -33,10 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DatePicker } from "@/components/ui/date-picker";
-import {
-  RoleBadge,
-  UserInitialsAvatar,
-} from "@/components/role-status-badge";
+import { UserInitialsAvatar } from "@/components/role-status-badge";
 import { cn } from "@/lib/utils";
 import { type UserRole } from "@/lib/roles";
 import { usePageTitle } from "@/hooks/use-page-title";
@@ -67,6 +65,7 @@ type Log = {
   endTime: string;
   hours: number;
   note?: string;
+  manualTaskTitle?: string;
   user: UserLite | null;
   project: ProjectLite | null;
   task: TaskLite | null;
@@ -128,6 +127,7 @@ export default function LogsPage() {
 
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const PAGE_SIZE = 25;
   const sentinelRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef(1);
@@ -262,8 +262,8 @@ export default function LogsPage() {
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Logs</h1>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-sm font-semibold">
             {isUser ? "My logs" : "All logs"}
           </h2>
@@ -275,13 +275,15 @@ export default function LogsPage() {
             {loading ? "…" : formatHours(totalHours)}
           </span>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <InputGroup className={`h-9 sm:w-64 ${controlClasses}`}>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:flex lg:flex-wrap lg:items-center">
+          <InputGroup
+            className={`col-span-2 h-9 sm:col-span-4 lg:w-64 ${controlClasses}`}
+          >
             <InputGroupAddon>
               <Search className="text-muted-foreground" />
             </InputGroupAddon>
             <InputGroupInput
-              placeholder="Search note"
+              placeholder="Search task or note"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -298,7 +300,9 @@ export default function LogsPage() {
             )}
           </InputGroup>
           <Select value={projectFilter} onValueChange={setProjectFilter}>
-            <SelectTrigger className={`w-full sm:w-48 ${controlClasses}`}>
+            <SelectTrigger
+              className={`col-span-2 w-full sm:col-span-2 lg:w-48 ${controlClasses}`}
+            >
               <SelectValue placeholder="All projects" />
             </SelectTrigger>
             <SelectContent>
@@ -312,7 +316,9 @@ export default function LogsPage() {
           </Select>
           {isManager && (
             <Select value={userFilter} onValueChange={setUserFilter}>
-              <SelectTrigger className={`w-full sm:w-48 ${controlClasses}`}>
+              <SelectTrigger
+                className={`col-span-2 w-full sm:col-span-2 lg:w-48 ${controlClasses}`}
+              >
                 <SelectValue placeholder="All users" />
               </SelectTrigger>
               <SelectContent>
@@ -329,24 +335,79 @@ export default function LogsPage() {
             value={dateFrom}
             onChange={setDateFrom}
             placeholder="From"
-            className="w-full sm:w-40"
+            className="w-full lg:w-40"
           />
           <DatePicker
             value={dateTo}
             onChange={setDateTo}
             placeholder="To"
-            className="w-full sm:w-40"
+            className="w-full lg:w-40"
           />
           {hasFilters && (
             <Button
               variant="ghost"
               size="sm"
               onClick={clearFilters}
-              className="h-9 text-muted-foreground hover:text-foreground"
+              className="col-span-1 h-9 text-muted-foreground hover:text-foreground lg:ml-auto"
             >
               <X className="mr-1 size-4" /> Clear
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="col-span-2 h-9 w-full sm:col-span-1 sm:w-auto"
+            disabled={exporting || total === 0}
+            onClick={async () => {
+              setExporting(true);
+              try {
+                const params = new URLSearchParams();
+                if (debouncedQuery) params.set("q", debouncedQuery);
+                if (projectFilter !== "all")
+                  params.set("project", projectFilter);
+                if (isManager && userFilter !== "all")
+                  params.set("user", userFilter);
+                if (dateFrom)
+                  params.set("dateFrom", dateFrom.toISOString());
+                if (dateTo) {
+                  const end = new Date(dateTo);
+                  end.setHours(23, 59, 59, 999);
+                  params.set("dateTo", end.toISOString());
+                }
+                const res = await fetch(
+                  `/api/logs/export?${params.toString()}`,
+                  { cache: "no-store" }
+                );
+                if (!res.ok) {
+                  const data = await res.json().catch(() => ({}));
+                  throw new Error(data.error ?? "Failed to export");
+                }
+                const blob = await res.blob();
+                const filename =
+                  res.headers
+                    .get("Content-Disposition")
+                    ?.match(/filename="?([^"]+)"?/)?.[1] ??
+                  `time-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = blobUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(blobUrl);
+              } catch (err) {
+                toast.error(
+                  err instanceof Error ? err.message : "Failed to export"
+                );
+              } finally {
+                setExporting(false);
+              }
+            }}
+          >
+            <Download className="mr-2 size-4" />
+            {exporting ? "Exporting…" : "Export CSV"}
+          </Button>
         </div>
       </div>
 
@@ -439,12 +500,9 @@ export default function LogsPage() {
                             role={l.user.role}
                             className="size-7 text-[10px]"
                           />
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">
-                              {l.user.name}
-                            </div>
-                            <RoleBadge role={l.user.role} />
-                          </div>
+                          <span className="truncate text-sm font-medium">
+                            {l.user.name}
+                          </span>
                         </div>
                       ) : (
                         <span className="text-sm text-muted-foreground">—</span>
@@ -455,11 +513,8 @@ export default function LogsPage() {
                     {l.project ? (
                       <Link
                         href={`/dashboard/projects/${l.project._id}`}
-                        className="flex items-center gap-2 text-sm hover:text-primary hover:underline"
+                        className="text-sm hover:text-primary hover:underline"
                       >
-                        <span className="rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                          {l.project.projectId}
-                        </span>
                         <span className="truncate">{l.project.name}</span>
                       </Link>
                     ) : (
@@ -470,15 +525,17 @@ export default function LogsPage() {
                     {l.task && l.project ? (
                       <Link
                         href={`/dashboard/projects/${l.project._id}?task=${l.task._id}`}
-                        className="flex items-center gap-2 hover:text-primary hover:underline"
+                        className="hover:text-primary hover:underline"
                       >
-                        {l.task.taskId && (
-                          <span className="rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                            {l.task.taskId}
-                          </span>
-                        )}
                         <span className="truncate">{l.task.title}</span>
                       </Link>
+                    ) : l.manualTaskTitle ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="truncate">{l.manualTaskTitle}</span>
+                        <span className="rounded border px-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          manual
+                        </span>
+                      </span>
                     ) : (
                       <span className="text-muted-foreground">
                         Project (general)
@@ -533,7 +590,11 @@ export default function LogsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">
-                      {l.task ? l.task.title : "Project (general)"}
+                      {l.task
+                        ? l.task.title
+                        : l.manualTaskTitle
+                          ? l.manualTaskTitle
+                          : "Project (general)"}
                     </div>
                     {l.project && (
                       <Link

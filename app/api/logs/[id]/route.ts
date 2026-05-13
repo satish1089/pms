@@ -15,6 +15,7 @@ const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 const updateSchema = z.object({
   task: z.string().nullable().optional(),
+  manualTaskTitle: z.string().max(200).optional(),
   date: z.string().min(1).optional(),
   startTime: z.string().regex(TIME_RE, "Invalid start time").optional(),
   endTime: z.string().regex(TIME_RE, "Invalid end time").optional(),
@@ -102,7 +103,15 @@ export async function PATCH(
         if (!task)
           return NextResponse.json({ error: "Task not found" }, { status: 400 });
         update.task = task._id;
+        update.manualTaskTitle = "";
       }
+    }
+
+    if (parsed.data.manualTaskTitle !== undefined) {
+      const trimmed = parsed.data.manualTaskTitle.trim();
+      const willHaveTask =
+        update.task !== undefined ? update.task !== null : Boolean(log.task);
+      update.manualTaskTitle = willHaveTask ? "" : trimmed;
     }
 
     if (parsed.data.note !== undefined) update.note = parsed.data.note.trim();
