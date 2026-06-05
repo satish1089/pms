@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import {
-  Clock,
-  Download,
-  Search,
-  X,
-} from "lucide-react";
+import { Clock, Download, Search, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -206,7 +201,7 @@ export default function LogsPage() {
         setTotalHours(data.totalHours ?? 0);
         const totalPages = Math.max(
           1,
-          Math.ceil((data.total ?? 0) / PAGE_SIZE)
+          Math.ceil((data.total ?? 0) / PAGE_SIZE),
         );
         setHasMore(pageNum < totalPages);
       } catch (err) {
@@ -216,7 +211,7 @@ export default function LogsPage() {
         setLoadingMore(false);
       }
     },
-    [debouncedQuery, projectFilter, userFilter, dateFrom, dateTo, isManager]
+    [debouncedQuery, projectFilter, userFilter, dateFrom, dateTo, isManager],
   );
 
   useEffect(() => {
@@ -235,7 +230,7 @@ export default function LogsPage() {
           fetchLogsPage(pageRef.current, true);
         }
       },
-      { rootMargin: "200px" }
+      { rootMargin: "200px" },
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -367,8 +362,7 @@ export default function LogsPage() {
                   params.set("project", projectFilter);
                 if (isManager && userFilter !== "all")
                   params.set("user", userFilter);
-                if (dateFrom)
-                  params.set("dateFrom", dateFrom.toISOString());
+                if (dateFrom) params.set("dateFrom", dateFrom.toISOString());
                 if (dateTo) {
                   const end = new Date(dateTo);
                   end.setHours(23, 59, 59, 999);
@@ -376,7 +370,7 @@ export default function LogsPage() {
                 }
                 const res = await fetch(
                   `/api/logs/export?${params.toString()}`,
-                  { cache: "no-store" }
+                  { cache: "no-store" },
                 );
                 if (!res.ok) {
                   const data = await res.json().catch(() => ({}));
@@ -398,7 +392,7 @@ export default function LogsPage() {
                 URL.revokeObjectURL(blobUrl);
               } catch (err) {
                 toast.error(
-                  err instanceof Error ? err.message : "Failed to export"
+                  err instanceof Error ? err.message : "Failed to export",
                 );
               } finally {
                 setExporting(false);
@@ -474,10 +468,7 @@ export default function LogsPage() {
               ))
             ) : logs.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell
-                  colSpan={isManager ? 7 : 6}
-                  className="h-40"
-                >
+                <TableCell colSpan={isManager ? 7 : 6} className="h-40">
                   <EmptyState
                     hasFilters={hasFilters}
                     onClear={clearFilters}
@@ -521,18 +512,26 @@ export default function LogsPage() {
                       <span className="text-sm text-muted-foreground">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="px-3 py-2.5 text-sm">
+                  <TableCell className="max-w-[320px] px-3 py-2.5 align-top text-sm">
                     {l.task && l.project ? (
                       <Link
                         href={`/dashboard/projects/${l.project._id}?task=${l.task._id}`}
                         className="hover:text-primary hover:underline"
+                        title={l.task.title}
                       >
-                        <span className="truncate">{l.task.title}</span>
+                        <span className="line-clamp-2 whitespace-pre-wrap break-words">
+                          {l.task.title}
+                        </span>
                       </Link>
                     ) : l.manualTaskTitle ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="truncate">{l.manualTaskTitle}</span>
-                        <span className="rounded border px-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      <span className="inline-flex items-start gap-1.5">
+                        <span
+                          className="line-clamp-2 whitespace-pre-wrap break-words"
+                          title={l.manualTaskTitle}
+                        >
+                          {l.manualTaskTitle}
+                        </span>
+                        <span className="shrink-0 rounded border px-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                           manual
                         </span>
                       </span>
@@ -555,8 +554,13 @@ export default function LogsPage() {
                       {formatHours(l.hours)}
                     </span>
                   </TableCell>
-                  <TableCell className="px-3 py-2.5 text-sm text-muted-foreground">
-                    <span className="line-clamp-2">{l.note || "—"}</span>
+                  <TableCell
+                    className="max-w-[420px] px-3 py-2.5 text-sm text-muted-foreground"
+                    title={l.note || undefined}
+                  >
+                    <span className="line-clamp-2 whitespace-pre-wrap break-words">
+                      {l.note || "—"}
+                    </span>
                   </TableCell>
                 </TableRow>
               ))
@@ -645,8 +649,8 @@ export default function LogsPage() {
           {loadingMore
             ? "Loading more…"
             : hasMore
-            ? "Scroll for more"
-            : `All ${total} logs loaded`}
+              ? "Scroll for more"
+              : `All ${total} logs loaded`}
         </div>
       )}
     </div>
@@ -672,16 +676,11 @@ function EmptyState({
         {hasFilters
           ? "Try clearing filters or adjusting your search."
           : isUser
-          ? "Open a project and use Logs → Add log to record your time."
-          : "Logs will show up here once people start tracking time."}
+            ? "Open a project and use Logs → Add log to record your time."
+            : "Logs will show up here once people start tracking time."}
       </p>
       {hasFilters && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="mt-1"
-          onClick={onClear}
-        >
+        <Button size="sm" variant="outline" className="mt-1" onClick={onClear}>
           <X className="mr-1 size-3.5" /> Clear filters
         </Button>
       )}

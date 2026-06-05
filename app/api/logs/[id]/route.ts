@@ -19,7 +19,7 @@ const updateSchema = z.object({
   date: z.string().min(1).optional(),
   startTime: z.string().regex(TIME_RE, "Invalid start time").optional(),
   endTime: z.string().regex(TIME_RE, "Invalid end time").optional(),
-  note: z.string().max(500).optional(),
+  note: z.string().optional(),
 });
 
 function toMinutes(t: string) {

@@ -188,12 +188,22 @@ export default function TasksPage() {
   const [projects, setProjects] = useState<ProjectLite[]>([]);
 
   const [view, setView] = useState<"list" | "board">("list");
+  const viewHydrated = useRef(false);
+  useEffect(() => {
+    if (localStorage.getItem("tasksView") === "board") setView("board");
+    viewHydrated.current = true;
+  }, []);
+  useEffect(() => {
+    if (viewHydrated.current) localStorage.setItem("tasksView", view);
+  }, [view]);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | TaskStatusKey>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | TaskStatusKey>(
+    "all",
+  );
   const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriorityKey>(
-    "all"
+    "all",
   );
   const [typeFilter, setTypeFilter] = useState<"all" | TaskTypeKey>("all");
   const [tagFilter, setTagFilter] = useState<string>("");
@@ -278,12 +288,14 @@ export default function TasksPage() {
         } else {
           const totalPages = Math.max(
             1,
-            Math.ceil((data.total ?? 0) / effectiveLimit)
+            Math.ceil((data.total ?? 0) / effectiveLimit),
           );
           setHasMore(pageNum < totalPages);
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to load tasks");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load tasks",
+        );
       } finally {
         setLoading(false);
         setLoadingMore(false);
@@ -297,7 +309,7 @@ export default function TasksPage() {
       typeFilter,
       tagFilter,
       view,
-    ]
+    ],
   );
 
   useEffect(() => {
@@ -316,7 +328,7 @@ export default function TasksPage() {
           fetchTasksPage(pageRef.current, true);
         }
       },
-      { rootMargin: "200px" }
+      { rootMargin: "200px" },
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -385,7 +397,7 @@ export default function TasksPage() {
       const canMove = canEdit || isAssignee;
       return { canEdit, canMove };
     },
-    [session, isManager]
+    [session, isManager],
   );
 
   async function moveTask(taskId: string, newStatus: TaskStatusKey) {
@@ -408,7 +420,7 @@ export default function TasksPage() {
 
     const prev = tasks;
     setTasks((ts) =>
-      ts.map((t) => (t._id === taskId ? { ...t, status: newStatus } : t))
+      ts.map((t) => (t._id === taskId ? { ...t, status: newStatus } : t)),
     );
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
@@ -424,7 +436,7 @@ export default function TasksPage() {
     } catch (err) {
       setTasks(prev);
       toast.error(
-        err instanceof Error ? err.message : "Failed to update status"
+        err instanceof Error ? err.message : "Failed to update status",
       );
     }
   }
@@ -510,9 +522,7 @@ export default function TasksPage() {
       const updated = data.task as Task | undefined;
       if (updated) {
         setTasks((ts) =>
-          ts.map((x) =>
-            x._id === editTask._id ? { ...x, ...updated } : x
-          )
+          ts.map((x) => (x._id === editTask._id ? { ...x, ...updated } : x)),
         );
       }
       toast.success("Task updated");
@@ -542,7 +552,7 @@ export default function TasksPage() {
     <div
       className={cn(
         "flex flex-col gap-5",
-        view === "board" && "h-[calc(100vh-7.5rem)]"
+        view === "board" && "h-[calc(100vh-7.5rem)]",
       )}
     >
       <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -565,7 +575,7 @@ export default function TasksPage() {
                 "flex items-center gap-1.5 px-2.5 py-1.5 text-xs",
                 view === "board"
                   ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent"
+                  : "text-muted-foreground hover:bg-accent",
               )}
             >
               <LayoutGrid className="size-3.5" /> Board
@@ -577,7 +587,7 @@ export default function TasksPage() {
                 "flex items-center gap-1.5 border-l px-2.5 py-1.5 text-xs",
                 view === "list"
                   ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent"
+                  : "text-muted-foreground hover:bg-accent",
               )}
             >
               <ListIcon className="size-3.5" /> List
@@ -763,21 +773,40 @@ export default function TasksPage() {
             <Table>
               <TableHeader>
                 <TableRow className="border-border/40 bg-muted/40 hover:bg-muted/40">
-                  <TableHead className="h-10 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Title</TableHead>
-                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Status</TableHead>
-                  <TableHead className="h-10 w-28 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Priority</TableHead>
-                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Type</TableHead>
-                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Due</TableHead>
-                  <TableHead className="h-10 w-56 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Project</TableHead>
-                  <TableHead className="h-10 w-36 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Assignees</TableHead>
-                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Created by</TableHead>
+                  <TableHead className="h-10 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Title
+                  </TableHead>
+                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Status
+                  </TableHead>
+                  <TableHead className="h-10 w-28 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Priority
+                  </TableHead>
+                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Type
+                  </TableHead>
+                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Due
+                  </TableHead>
+                  <TableHead className="h-10 w-56 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Project
+                  </TableHead>
+                  <TableHead className="h-10 w-36 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Assignees
+                  </TableHead>
+                  <TableHead className="h-10 w-32 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Created by
+                  </TableHead>
                   <TableHead className="h-10 w-12 px-3" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i} className="border-border/40 hover:bg-transparent">
+                    <TableRow
+                      key={i}
+                      className="border-border/40 hover:bg-transparent"
+                    >
                       <TableCell className="px-3 py-2.5">
                         <Skeleton className="h-4 w-56" />
                       </TableCell>
@@ -823,15 +852,15 @@ export default function TasksPage() {
                         key={t._id}
                         className={cn(
                           "border-border/40 hover:bg-transparent",
-                          STATUS_ROW_BG[t.status]
+                          STATUS_ROW_BG[t.status],
                         )}
                       >
                         <TableCell className="px-3 py-2.5 text-sm font-medium">
-                          <div className="group/title flex items-center gap-2">
+                          <div className="group/title flex items-center gap-2 ">
                             {t.project ? (
                               <Link
                                 href={`/dashboard/projects/${t.project._id}?task=${t._id}`}
-                                className="hover:text-primary hover:underline"
+                                className="hover:text-primary hover:underline line-clamp-2 whitespace-pre-wrap break-words"
                                 title="Open in project"
                               >
                                 {t.title}
@@ -903,7 +932,10 @@ export default function TasksPage() {
                           <TaskTypeBadge type={t.type ?? "new"} />
                         </TableCell>
                         <TableCell className="px-3 py-2.5 text-xs">
-                          <DueLabel due={t.dueDate} isDone={t.status === "done"} />
+                          <DueLabel
+                            due={t.dueDate}
+                            isDone={t.status === "done"}
+                          />
                         </TableCell>
                         <TableCell className="px-3 py-2.5">
                           {t.project ? (
@@ -917,7 +949,9 @@ export default function TasksPage() {
                               <span className="truncate">{t.project.name}</span>
                             </Link>
                           ) : (
-                            <span className="text-sm text-muted-foreground">—</span>
+                            <span className="text-sm text-muted-foreground">
+                              —
+                            </span>
                           )}
                         </TableCell>
                         <TableCell className="px-3 py-2.5">
@@ -964,47 +998,50 @@ export default function TasksPage() {
                 {tasks.map((t) => {
                   const { canEdit: canDel } = permsFor(t);
                   return (
-                  <li
-                    key={t._id}
-                    className={cn("flex flex-col gap-2 p-4", STATUS_ROW_BG[t.status])}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      {t.project ? (
-                        <Link
-                          href={`/dashboard/projects/${t.project._id}?task=${t._id}`}
-                          className="font-medium hover:text-primary hover:underline"
-                        >
-                          {t.title}
-                        </Link>
-                      ) : (
-                        <span className="font-medium">{t.title}</span>
+                    <li
+                      key={t._id}
+                      className={cn(
+                        "flex flex-col gap-2 p-4",
+                        STATUS_ROW_BG[t.status],
                       )}
-                      {canDel && (
-                        <button
-                          type="button"
-                          aria-label="Delete task"
-                          title="Delete task"
-                          onClick={() => setPendingDelete(t)}
-                          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <TaskStatusBadge status={t.status} />
-                      {t.project && (
-                        <Link
-                          href={`/dashboard/projects/${t.project._id}`}
-                          className="hover:text-primary hover:underline"
-                        >
-                          {t.project.name}
-                        </Link>
-                      )}
-                      <span>· {formatDate(t.createdAt)}</span>
-                    </div>
-                    <AssigneeStack assignees={t.assignees} />
-                  </li>
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        {t.project ? (
+                          <Link
+                            href={`/dashboard/projects/${t.project._id}?task=${t._id}`}
+                            className="font-medium hover:text-primary hover:underline"
+                          >
+                            {t.title}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">{t.title}</span>
+                        )}
+                        {canDel && (
+                          <button
+                            type="button"
+                            aria-label="Delete task"
+                            title="Delete task"
+                            onClick={() => setPendingDelete(t)}
+                            className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <TaskStatusBadge status={t.status} />
+                        {t.project && (
+                          <Link
+                            href={`/dashboard/projects/${t.project._id}`}
+                            className="hover:text-primary hover:underline"
+                          >
+                            {t.project.name}
+                          </Link>
+                        )}
+                        <span>· {formatDate(t.createdAt)}</span>
+                      </div>
+                      <AssigneeStack assignees={t.assignees} />
+                    </li>
                   );
                 })}
               </ul>
@@ -1019,8 +1056,8 @@ export default function TasksPage() {
               {loadingMore
                 ? "Loading more…"
                 : hasMore
-                ? "Scroll for more"
-                : `All ${total} tasks loaded`}
+                  ? "Scroll for more"
+                  : `All ${total} tasks loaded`}
             </div>
           )}
         </>
@@ -1122,7 +1159,12 @@ function BoardView({
   draggingId: string | null;
   dragOverCol: TaskStatusKey | null;
   setDraggingId: (v: string | null) => void;
-  setDragOverCol: (v: TaskStatusKey | null | ((c: TaskStatusKey | null) => TaskStatusKey | null)) => void;
+  setDragOverCol: (
+    v:
+      | TaskStatusKey
+      | null
+      | ((c: TaskStatusKey | null) => TaskStatusKey | null),
+  ) => void;
   moveTask: (taskId: string, newStatus: TaskStatusKey) => void;
   openEditTask: (t: Task) => void;
   openViewTask: (t: Task) => void;
@@ -1153,9 +1195,7 @@ function BoardView({
                 e.preventDefault();
                 setDragOverCol(col);
               }}
-              onDragLeave={() =>
-                setDragOverCol((c) => (c === col ? null : c))
-              }
+              onDragLeave={() => setDragOverCol((c) => (c === col ? null : c))}
               onDrop={(e) => {
                 e.preventDefault();
                 if (draggingId) moveTask(draggingId, col);
@@ -1164,7 +1204,7 @@ function BoardView({
               }}
               className={cn(
                 "flex h-full w-72 shrink-0 flex-col overflow-hidden rounded-lg border bg-muted/30",
-                isOver && "ring-2 ring-primary/40"
+                isOver && "ring-2 ring-primary/40",
               )}
             >
               <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 px-2.5 py-1.5">
@@ -1267,7 +1307,7 @@ function BoardCard({
         "group select-none rounded-lg border p-2.5 shadow-sm transition-all hover:shadow-md",
         TASK_STATUS_STYLES[task.status].card,
         canMove ? "cursor-grab" : "cursor-pointer",
-        dragging && "opacity-40 cursor-grabbing"
+        dragging && "opacity-40 cursor-grabbing",
       )}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -1381,7 +1421,7 @@ function InlineStatusSelect({
         size="sm"
         className={cn(
           "h-7 w-[130px] gap-1.5 border-transparent px-2 text-xs font-medium shadow-none hover:border-border",
-          TASK_STATUS_STYLES[task.status].cls
+          TASK_STATUS_STYLES[task.status].cls,
         )}
       >
         <SelectValue />
@@ -1393,7 +1433,7 @@ function InlineStatusSelect({
               <span
                 className={cn(
                   "size-1.5 rounded-full",
-                  TASK_STATUS_STYLES[s].dot
+                  TASK_STATUS_STYLES[s].dot,
                 )}
               />
               {TASK_STATUS_STYLES[s].label}
@@ -1413,7 +1453,7 @@ function DueLabel({ due, isDone }: { due: string | null; isDone: boolean }) {
   const dm = new Date(d);
   dm.setHours(0, 0, 0, 0);
   const diff = Math.round(
-    (dm.getTime() - today.getTime()) / (24 * 3600 * 1000)
+    (dm.getTime() - today.getTime()) / (24 * 3600 * 1000),
   );
   const overdue = !isDone && diff < 0;
   const soon = !isDone && diff >= 0 && diff <= 2;
@@ -1428,7 +1468,7 @@ function DueLabel({ due, isDone }: { due: string | null; isDone: boolean }) {
         "font-medium",
         overdue && "text-rose-600 dark:text-rose-400",
         soon && !overdue && "text-amber-600 dark:text-amber-400",
-        !overdue && !soon && "text-muted-foreground"
+        !overdue && !soon && "text-muted-foreground",
       )}
     >
       {label}
@@ -1502,8 +1542,8 @@ function EmptyState({
         {hasFilters
           ? "No tasks match your filters"
           : isUser
-          ? "No tasks assigned to you yet"
-          : "No tasks yet"}
+            ? "No tasks assigned to you yet"
+            : "No tasks yet"}
       </p>
       <p className="text-xs text-muted-foreground">
         {hasFilters
@@ -1549,7 +1589,7 @@ function ViewTaskDialog({
             <div
               className={cn(
                 "relative px-5 pt-5 pb-4 border-b border-border/60",
-                style.card
+                style.card,
               )}
             >
               <button
@@ -1870,7 +1910,7 @@ function EditTaskDialog({
                         <span
                           className={cn(
                             "size-1.5 rounded-full",
-                            TASK_STATUS_STYLES[s].dot
+                            TASK_STATUS_STYLES[s].dot,
                           )}
                         />
                         {TASK_STATUS_STYLES[s].label}
@@ -1905,7 +1945,7 @@ function EditTaskDialog({
                         <span
                           className={cn(
                             "size-1.5 rounded-full",
-                            TASK_TYPE_STYLES[k].dot
+                            TASK_TYPE_STYLES[k].dot,
                           )}
                         />
                         {TASK_TYPE_STYLES[k].label}

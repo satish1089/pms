@@ -13,7 +13,7 @@ import { validationResponse } from "@/lib/api-errors";
 
 const startSchema = z.object({
   taskId: z.string().min(1),
-  note: z.string().max(500).optional(),
+  note: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {

@@ -65,15 +65,15 @@ export async function GET(req: NextRequest) {
       if (dateFrom) {
         const d = new Date(dateFrom);
         if (!Number.isNaN(d.getTime())) {
-          d.setHours(0, 0, 0, 0);
           range.$gte = d;
         }
       }
       if (dateTo) {
         const d = new Date(dateTo);
         if (!Number.isNaN(d.getTime())) {
-          d.setHours(23, 59, 59, 999);
-          range.$lte = d;
+          // dateTo is the selected day's start instant; include the whole day.
+          d.setTime(d.getTime() + 24 * 60 * 60 * 1000);
+          range.$lt = d;
         }
       }
       if (Object.keys(range).length > 0) filter.date = range;

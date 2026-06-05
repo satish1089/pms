@@ -76,7 +76,6 @@ export function TimerNoteDialog({
                 : "What did you work on?"
             }
             rows={3}
-            maxLength={500}
             disabled={busy}
             autoFocus
           />

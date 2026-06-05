@@ -12,7 +12,7 @@ import { getSession } from "@/lib/auth";
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 const stopSchema = z.object({
-  note: z.string().max(500).optional(),
+  note: z.string().optional(),
   clientDate: z.string().optional(),
   clientStartTime: z.string().regex(TIME_RE).optional(),
   clientEndTime: z.string().regex(TIME_RE).optional(),

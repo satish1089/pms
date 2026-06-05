@@ -23,7 +23,7 @@ const createSchema = z.object({
   date: z.string().min(1),
   startTime: z.string().regex(TIME_RE, "Invalid start time"),
   endTime: z.string().regex(TIME_RE, "Invalid end time"),
-  note: z.string().max(500).default(""),
+  note: z.string().default(""),
 });
 
 function toMinutes(t: string) {
@@ -33,7 +33,7 @@ function toMinutes(t: string) {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
   if (!session)
@@ -47,10 +47,13 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const url = new URL(req.url);
-    const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+    const page = Math.max(
+      1,
+      parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+    );
     const limit = Math.min(
       100,
-      Math.max(1, parseInt(url.searchParams.get("limit") ?? "10", 10) || 10)
+      Math.max(1, parseInt(url.searchParams.get("limit") ?? "10", 10) || 10),
     );
     const userParam = url.searchParams.get("userId");
     const startParam = url.searchParams.get("startDate");
@@ -63,7 +66,10 @@ export async function GET(
     if (isManager) {
       if (userParam && userParam !== "all") {
         if (!mongoose.Types.ObjectId.isValid(userParam))
-          return NextResponse.json({ error: "Invalid userId" }, { status: 400 });
+          return NextResponse.json(
+            { error: "Invalid userId" },
+            { status: 400 },
+          );
         filter.user = new mongoose.Types.ObjectId(userParam);
       }
     } else {
@@ -75,16 +81,22 @@ export async function GET(
       if (startParam) {
         const d = new Date(startParam);
         if (Number.isNaN(d.getTime()))
-          return NextResponse.json({ error: "Invalid startDate" }, { status: 400 });
-        d.setHours(0, 0, 0, 0);
+          return NextResponse.json(
+            { error: "Invalid startDate" },
+            { status: 400 },
+          );
         range.$gte = d;
       }
       if (endParam) {
         const d = new Date(endParam);
         if (Number.isNaN(d.getTime()))
-          return NextResponse.json({ error: "Invalid endDate" }, { status: 400 });
-        d.setHours(23, 59, 59, 999);
-        range.$lte = d;
+          return NextResponse.json(
+            { error: "Invalid endDate" },
+            { status: 400 },
+          );
+        // endParam is the selected day's start instant; include the whole day.
+        d.setTime(d.getTime() + 24 * 60 * 60 * 1000);
+        range.$lt = d;
       }
       filter.date = range;
     }
@@ -134,7 +146,7 @@ export async function GET(
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await getSession();
   if (!session)
@@ -160,9 +172,9 @@ export async function POST(
     if (endMin <= startMin)
       return NextResponse.json(
         { error: "End time must be after start time" },
-        { status: 400 }
+        { status: 400 },
       );
-    const hours = +(((endMin - startMin) / 60).toFixed(2));
+    const hours = +((endMin - startMin) / 60).toFixed(2);
 
     let taskRef: mongoose.Types.ObjectId | null = null;
     if (parsed.data.task && parsed.data.task !== "project") {
