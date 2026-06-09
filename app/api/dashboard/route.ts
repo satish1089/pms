@@ -19,27 +19,43 @@ function startOfWeek() {
   return d;
 }
 
-function startOfDayMinusN(n: number) {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  d.setUTCDate(d.getUTCDate() - n);
-  return d;
+// "YYYY-MM-DD" wall-clock date for an instant in the given IANA timezone.
+function ymdInTz(date: Date, tz: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+// UTC-midnight instant representing "today" as seen in tz (used as a stable
+// base to iterate calendar days; keys match $dateToString with timezone: tz).
+function tzTodayBaseUTC(tz: string) {
+  const [y, m, d] = ymdInTz(new Date(), tz).split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+// Lower-bound instant for the trend window. Widened a day so no in-range log
+// is excluded by tz offset; out-of-range buckets are ignored by key lookup.
+function trendStartInTz(tz: string, daysBack: number) {
+  return new Date(tzTodayBaseUTC(tz) - (daysBack + 1) * 86400000);
 }
 
 function buildHoursByDay(
   rows: { _id: string; total: number }[],
-  days: number
+  days: number,
+  tz: string
 ) {
   const map = new Map(rows.map((r) => [r._id, r.total] as const));
+  const base = tzTodayBaseUTC(tz);
   const out: { day: string; label: string; hours: number }[] = [];
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setUTCHours(0, 0, 0, 0);
-    d.setUTCDate(d.getUTCDate() - i);
+    const d = new Date(base - i * 86400000);
     const iso = d.toISOString().slice(0, 10);
     out.push({
       day: iso,
-      label: d.toLocaleDateString(undefined, {
+      label: d.toLocaleDateString("en-US", {
         weekday: "short",
         timeZone: "UTC",
       }),
@@ -60,8 +76,17 @@ export async function GET(_req: NextRequest) {
     const role = session.role;
     const userObjectId = new mongoose.Types.ObjectId(session.sub);
 
+    const tzParam = _req.nextUrl.searchParams.get("tz") || "UTC";
+    let tz = tzParam;
+    try {
+      // validate IANA tz; fall back to UTC if invalid
+      new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    } catch {
+      tz = "UTC";
+    }
+
     const weekStart = startOfWeek();
-    const trendStart = startOfDayMinusN(6); // 7 days incl. today
+    const trendStart = trendStartInTz(tz, 6); // 7 days incl. today
 
     if (role === "user") {
       const projectVisibility = {
@@ -118,7 +143,11 @@ export async function GET(_req: NextRequest) {
           {
             $group: {
               _id: {
-                $dateToString: { format: "%Y-%m-%d", date: "$date" },
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$date",
+                  timezone: tz,
+                },
               },
               total: { $sum: "$hours" },
             },
@@ -152,7 +181,8 @@ export async function GET(_req: NextRequest) {
         recentLogs,
         hoursByDay: buildHoursByDay(
           (myHoursByDayAgg as { _id: string; total: number }[]) ?? [],
-          7
+          7,
+          tz
         ),
       });
     }
@@ -234,7 +264,13 @@ export async function GET(_req: NextRequest) {
         { $match: { date: { $gte: trendStart } } },
         {
           $group: {
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+            _id: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$date",
+                timezone: tz,
+              },
+            },
             total: { $sum: "$hours" },
           },
         },
@@ -276,7 +312,8 @@ export async function GET(_req: NextRequest) {
       topLoggers: topLoggersAgg,
       hoursByDay: buildHoursByDay(
         (hoursByDayAgg as { _id: string; total: number }[]) ?? [],
-        7
+        7,
+        tz
       ),
     });
   } catch (err) {

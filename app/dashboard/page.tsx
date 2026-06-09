@@ -178,7 +178,10 @@ export default function DashboardHome() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/dashboard", { cache: "no-store" });
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const res = await fetch(`/api/dashboard?tz=${encodeURIComponent(tz)}`, {
+        cache: "no-store",
+      });
       const d = await res.json();
       if (res.ok) {
         setData(d);
@@ -234,7 +237,7 @@ export default function DashboardHome() {
       <section
         className={cn(
           "grid gap-4 sm:grid-cols-2",
-          canManage ? "lg:grid-cols-4" : "lg:grid-cols-3"
+          canManage ? "lg:grid-cols-4" : "lg:grid-cols-3",
         )}
       >
         <StatCard
@@ -388,10 +391,7 @@ export default function DashboardHome() {
           </>
         ) : (
           <div className="lg:col-span-6">
-            <RecentLogsCard
-              logs={data?.recentLogs ?? []}
-              loading={loading}
-            />
+            <RecentLogsCard logs={data?.recentLogs ?? []} loading={loading} />
           </div>
         )}
       </section>
@@ -613,13 +613,13 @@ function StatCard({
       <div
         className={cn(
           "flex h-full items-center gap-3 rounded-xl border bg-card p-3.5 transition-colors",
-          t.ring
+          t.ring,
         )}
       >
         <div
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-lg",
-            t.iconBg
+            t.iconBg,
           )}
         >
           <Icon className="size-5" />
@@ -659,13 +659,13 @@ function HoursStatCard({
     <div
       className={cn(
         "flex h-full items-center gap-3 rounded-xl border bg-card p-3.5 transition-all",
-        t.ring
+        t.ring,
       )}
     >
       <div
         className={cn(
           "flex size-10 shrink-0 items-center justify-center rounded-lg",
-          t.iconBg
+          t.iconBg,
         )}
       >
         <Clock className="size-5" />
@@ -679,11 +679,7 @@ function HoursStatCard({
         </p>
       </div>
       <div className="text-2xl font-bold tracking-tight tabular-nums">
-        {loading ? (
-          <Skeleton className="h-7 w-14" />
-        ) : (
-          formatHours(weekHours)
-        )}
+        {loading ? <Skeleton className="h-7 w-14" /> : formatHours(weekHours)}
       </div>
       <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
         Week
@@ -714,7 +710,7 @@ function StatusDistributionCard({
     <div
       className={cn(
         "flex h-full flex-col rounded-xl border bg-card p-5",
-        className
+        className,
       )}
     >
       <div className="mb-4 flex items-center justify-between">
@@ -744,7 +740,7 @@ function StatusDistributionCard({
                     <span
                       className={cn(
                         "size-2 rounded-full",
-                        TASK_STATUS_STYLES[k].dot
+                        TASK_STATUS_STYLES[k].dot,
                       )}
                     />
                     <span className="font-medium">
@@ -752,14 +748,15 @@ function StatusDistributionCard({
                     </span>
                   </span>
                   <span className="tabular-nums text-muted-foreground">
-                    {n} <span className="text-muted-foreground/60">·</span> {pct}%
+                    {n} <span className="text-muted-foreground/60">·</span>{" "}
+                    {pct}%
                   </span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                   <div
                     className={cn(
                       "h-full rounded-full transition-all",
-                      TASK_STATUS_STYLES[k].dot
+                      TASK_STATUS_STYLES[k].dot,
                     )}
                     style={{ width: `${pct}%` }}
                   />

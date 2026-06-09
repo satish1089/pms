@@ -3239,8 +3239,8 @@ export default function ProjectDetailPage() {
                       if (!open) setEditingLogId(null);
                     }}
                   >
-                    <DialogContent className="sm:max-w-xl">
-                      <DialogHeader>
+                    <DialogContent className="!flex max-h-[90vh] flex-col overflow-hidden sm:max-w-xl">
+                      <DialogHeader className="shrink-0">
                         <DialogTitle>
                           {editingLogId ? "Edit time log" : "Add time log"}
                         </DialogTitle>
@@ -3250,7 +3250,7 @@ export default function ProjectDetailPage() {
                             : "Record hours worked on the project or a specific task."}
                         </DialogDescription>
                       </DialogHeader>
-                      <div className="space-y-4 py-2">
+                      <div className="scrollbar-hide min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-2">
                         <div className="grid gap-1.5">
                           <Label>Task</Label>
                           <InputGroup className="min-w-0 overflow-hidden">
@@ -3488,14 +3488,14 @@ export default function ProjectDetailPage() {
                           <Label>Note</Label>
                           <Textarea
                             rows={4}
-                            className="w-full resize-y shadow-none"
+                            className="max-h-80 w-full resize-none overflow-y-auto shadow-none"
                             value={logNote}
                             onChange={(e) => setLogNote(e.target.value)}
                             placeholder="What did you work on?"
                           />
                         </div>
                       </div>
-                      <DialogFooter>
+                      <DialogFooter className="shrink-0 pt-2">
                         <Button
                           type="button"
                           variant="outline"
@@ -3575,7 +3575,11 @@ export default function ProjectDetailPage() {
                                   body: JSON.stringify({
                                     task: taskPayload,
                                     manualTaskTitle: manualPayload,
-                                    date: logDate.toISOString(),
+                                    date: `${logDate.getFullYear()}-${String(
+                                      logDate.getMonth() + 1,
+                                    ).padStart(2, "0")}-${String(
+                                      logDate.getDate(),
+                                    ).padStart(2, "0")}`,
                                     startTime: `${logStartHour}:${logStartMin}`,
                                     endTime: `${logEndHour}:${logEndMin}`,
                                     note: logNote.trim(),
@@ -4218,11 +4222,14 @@ export default function ProjectDetailPage() {
 
       <Dialog open={taskDialogOpen} onOpenChange={setTaskDialogOpen}>
         <DialogContent
-          className="sm:max-w-xl"
+          className="!flex max-h-[90vh] flex-col overflow-hidden sm:max-w-xl"
           onInteractOutside={(e) => e.preventDefault()}
         >
-          <form onSubmit={handleCreateTask} className="space-y-4">
-            <DialogHeader>
+          <form
+            onSubmit={handleCreateTask}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <DialogHeader className="shrink-0">
               <DialogTitle>{taskEditId ? "Edit task" : "Add task"}</DialogTitle>
               <DialogDescription>
                 {taskEditId
@@ -4231,164 +4238,166 @@ export default function ProjectDetailPage() {
               </DialogDescription>
             </DialogHeader>
 
-            <FormAlert message={taskAlert} />
+            <div className="scrollbar-hide min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-1">
+              <FormAlert message={taskAlert} />
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="task-title">
-                Title
-                <RequiredMark />
-              </Label>
-              <Input
-                id="task-title"
-                value={taskTitle}
-                onChange={(e) => {
-                  setTaskTitle(e.target.value);
-                  if (taskErrors.title)
-                    setTaskErrors((p) => ({ ...p, title: "" }));
-                }}
-                placeholder="Short, action-oriented title"
-                aria-invalid={taskErrors.title ? true : undefined}
-                className="shadow-none"
-                autoFocus
-              />
-              <FieldError reserve message={taskErrors.title} />
-            </div>
-
-            <div className="grid gap-1.5">
-              <Label>Description</Label>
-              <RichTextEditor
-                value={taskDesc}
-                onChange={setTaskDesc}
-                placeholder="Describe the task — @mention people, #link tasks, paste URLs…"
-                minHeight="min-h-32"
-                invalid={Boolean(taskErrors.description)}
-                mentionUsers={projectMembers}
-                hashTasks={hashTasks}
-              />
-              <FieldError message={taskErrors.description} />
-            </div>
-
-            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-3">
               <div className="grid gap-1.5">
-                <Label>Status</Label>
-                <Select
-                  value={taskStatus}
-                  onValueChange={(v) => setTaskStatus(v as TaskStatusKey)}
-                >
-                  <SelectTrigger className="w-full shadow-none">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {BOARD_COLUMNS.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              TASK_STATUS_STYLES[s].dot,
-                            )}
-                          />
-                          {TASK_STATUS_STYLES[s].label}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Priority</Label>
-                <PrioritySelect
-                  value={taskPriority}
-                  onChange={setTaskPriority}
-                  triggerClassName="h-9 w-full text-sm"
-                  size="default"
+                <Label htmlFor="task-title">
+                  Title
+                  <RequiredMark />
+                </Label>
+                <Input
+                  id="task-title"
+                  value={taskTitle}
+                  onChange={(e) => {
+                    setTaskTitle(e.target.value);
+                    if (taskErrors.title)
+                      setTaskErrors((p) => ({ ...p, title: "" }));
+                  }}
+                  placeholder="Short, action-oriented title"
+                  aria-invalid={taskErrors.title ? true : undefined}
+                  className="shadow-none"
+                  autoFocus
                 />
+                <FieldError reserve message={taskErrors.title} />
               </div>
+
               <div className="grid gap-1.5">
-                <Label>Type</Label>
-                <Select
-                  value={taskType}
-                  onValueChange={(v) => setTaskType(v as TaskTypeKey)}
-                >
-                  <SelectTrigger className="w-full shadow-none">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(TASK_TYPE_STYLES) as TaskTypeKey[]).map(
-                      (k) => (
-                        <SelectItem key={k} value={k}>
+                <Label>Description</Label>
+                <RichTextEditor
+                  value={taskDesc}
+                  onChange={setTaskDesc}
+                  placeholder="Describe the task — @mention people, #link tasks, paste URLs…"
+                  minHeight="min-h-32"
+                  invalid={Boolean(taskErrors.description)}
+                  mentionUsers={projectMembers}
+                  hashTasks={hashTasks}
+                />
+                <FieldError message={taskErrors.description} />
+              </div>
+
+              <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-3">
+                <div className="grid gap-1.5">
+                  <Label>Status</Label>
+                  <Select
+                    value={taskStatus}
+                    onValueChange={(v) => setTaskStatus(v as TaskStatusKey)}
+                  >
+                    <SelectTrigger className="w-full shadow-none">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BOARD_COLUMNS.map((s) => (
+                        <SelectItem key={s} value={s}>
                           <span className="flex items-center gap-2">
                             <span
                               className={cn(
                                 "size-1.5 rounded-full",
-                                TASK_TYPE_STYLES[k].dot,
+                                TASK_STATUS_STYLES[s].dot,
                               )}
                             />
-                            {TASK_TYPE_STYLES[k].label}
+                            {TASK_STATUS_STYLES[s].label}
                           </span>
                         </SelectItem>
-                      ),
-                    )}
-                  </SelectContent>
-                </Select>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Priority</Label>
+                  <PrioritySelect
+                    value={taskPriority}
+                    onChange={setTaskPriority}
+                    triggerClassName="h-9 w-full text-sm"
+                    size="default"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Type</Label>
+                  <Select
+                    value={taskType}
+                    onValueChange={(v) => setTaskType(v as TaskTypeKey)}
+                  >
+                    <SelectTrigger className="w-full shadow-none">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(TASK_TYPE_STYLES) as TaskTypeKey[]).map(
+                        (k) => (
+                          <SelectItem key={k} value={k}>
+                            <span className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  "size-1.5 rounded-full",
+                                  TASK_TYPE_STYLES[k].dot,
+                                )}
+                              />
+                              {TASK_TYPE_STYLES[k].label}
+                            </span>
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid gap-1.5">
+                <Label>Tags</Label>
+                <TagsInput
+                  value={taskTags}
+                  onChange={setTaskTags}
+                  suggestions={projectTags}
+                  placeholder="Add tag — Enter to add"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="task-assigned">Assigned date</Label>
+                  <DatePicker
+                    id="task-assigned"
+                    value={taskAssignedDate}
+                    onChange={setTaskAssignedDate}
+                    placeholder="Pick start date"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="task-due">Due date</Label>
+                  <DatePicker
+                    id="task-due"
+                    value={taskDueDate}
+                    onChange={setTaskDueDate}
+                    placeholder="Pick due date"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label>Assignees</Label>
+                  <ProjectUserPicker
+                    options={taskPickerOptions}
+                    selected={taskAssignees}
+                    onChange={setTaskAssignees}
+                    placeholder="Select assignees"
+                  />
+                  <FieldError message={taskErrors.assignees} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Reporting persons</Label>
+                  <ProjectUserPicker
+                    options={taskPickerOptions}
+                    selected={taskReporting}
+                    onChange={setTaskReporting}
+                    placeholder="Select reporting persons"
+                  />
+                  <FieldError message={taskErrors.reportingPersons} />
+                </div>
               </div>
             </div>
 
-            <div className="grid gap-1.5">
-              <Label>Tags</Label>
-              <TagsInput
-                value={taskTags}
-                onChange={setTaskTags}
-                suggestions={projectTags}
-                placeholder="Add tag — Enter to add"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label htmlFor="task-assigned">Assigned date</Label>
-                <DatePicker
-                  id="task-assigned"
-                  value={taskAssignedDate}
-                  onChange={setTaskAssignedDate}
-                  placeholder="Pick start date"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="task-due">Due date</Label>
-                <DatePicker
-                  id="task-due"
-                  value={taskDueDate}
-                  onChange={setTaskDueDate}
-                  placeholder="Pick due date"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label>Assignees</Label>
-                <ProjectUserPicker
-                  options={taskPickerOptions}
-                  selected={taskAssignees}
-                  onChange={setTaskAssignees}
-                  placeholder="Select assignees"
-                />
-                <FieldError message={taskErrors.assignees} />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Reporting persons</Label>
-                <ProjectUserPicker
-                  options={taskPickerOptions}
-                  selected={taskReporting}
-                  onChange={setTaskReporting}
-                  placeholder="Select reporting persons"
-                />
-                <FieldError message={taskErrors.reportingPersons} />
-              </div>
-            </div>
-
-            <DialogFooter>
+            <DialogFooter className="shrink-0 pt-2">
               <Button
                 type="button"
                 variant="outline"

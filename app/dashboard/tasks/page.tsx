@@ -188,14 +188,16 @@ export default function TasksPage() {
   const [projects, setProjects] = useState<ProjectLite[]>([]);
 
   const [view, setView] = useState<"list" | "board">("list");
-  const viewHydrated = useRef(false);
+  // Gate first fetch until view restored from localStorage, else a list-then-board
+  // double fetch races and the stale list response can overwrite the board data.
+  const [viewReady, setViewReady] = useState(false);
   useEffect(() => {
     if (localStorage.getItem("tasksView") === "board") setView("board");
-    viewHydrated.current = true;
+    setViewReady(true);
   }, []);
   useEffect(() => {
-    if (viewHydrated.current) localStorage.setItem("tasksView", view);
-  }, [view]);
+    if (viewReady) localStorage.setItem("tasksView", view);
+  }, [view, viewReady]);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string>("all");
@@ -313,9 +315,10 @@ export default function TasksPage() {
   );
 
   useEffect(() => {
+    if (!viewReady) return;
     pageRef.current = 1;
     fetchTasksPage(1, false);
-  }, [fetchTasksPage]);
+  }, [fetchTasksPage, viewReady]);
 
   useEffect(() => {
     if (view === "board" || !hasMore || loading || loadingMore) return;
