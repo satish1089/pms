@@ -570,7 +570,7 @@ export default function TasksPage() {
           <span className="rounded-full border bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
             {loading ? "…" : `${total} total`}
           </span>
-          <div className="ml-auto inline-flex overflow-hidden rounded-md border bg-background sm:ml-0">
+          <div className="ml-auto inline-flex overflow-hidden rounded-md border bg-background">
             <button
               type="button"
               onClick={() => setView("board")}

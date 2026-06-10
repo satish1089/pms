@@ -1,5 +1,11 @@
+import { Types } from "mongoose";
 import User from "@/models/User";
-import { isSlackConfigured, sendSlackDM } from "@/lib/slack";
+import {
+  isSlackConfigured,
+  lookupSlackUserByEmail,
+  sendSlackDM,
+  SlackError400,
+} from "@/lib/slack";
 
 type AssignmentChange = {
   userId: string;
@@ -25,10 +31,95 @@ type TaskMeta = {
   title: string;
 };
 
+type RecipientLean = {
+  _id: Types.ObjectId;
+  email?: string;
+  settings?: {
+    slack?: {
+      connected?: boolean;
+      slackUserId?: string;
+      notifyOnAssign?: boolean;
+      notifyOnComment?: boolean;
+      notifyOnStatusChange?: boolean;
+    };
+  };
+};
+
 const ROLE_LABEL = {
   assignee: "assignee",
   reportingTo: "reporting person",
 } as const;
+
+async function loadRecipients(
+  ids: string[]
+): Promise<Map<string, RecipientLean>> {
+  const users = await User.find({ _id: { $in: ids } })
+    .select("email settings.slack")
+    .lean();
+  return new Map(users.map((u) => [String(u._id), u as RecipientLean]));
+}
+
+// Returns the Slack user id for a recipient. Users who never clicked
+// "Connect Slack" are auto-connected by workspace email lookup so every
+// user with a workspace account receives notifications; the resolved id
+// is persisted to avoid repeat lookups.
+async function resolveSlackUserId(
+  u: RecipientLean | undefined
+): Promise<string | null> {
+  if (!u) return null;
+  const slack = u.settings?.slack;
+  if (slack?.connected && slack.slackUserId) return slack.slackUserId;
+  if (!u.email) return null;
+  try {
+    const slackUser = await lookupSlackUserByEmail(u.email);
+    const handle =
+      slackUser.profile?.display_name ||
+      slackUser.profile?.real_name ||
+      slackUser.real_name ||
+      slackUser.name ||
+      "";
+    await User.updateOne(
+      { _id: u._id },
+      {
+        $set: {
+          "settings.slack.connected": true,
+          "settings.slack.slackUserId": slackUser.id,
+          "settings.slack.slackTeamId": slackUser.team_id ?? "",
+          "settings.slack.slackHandle": handle,
+          "settings.slack.connectedAt": new Date(),
+        },
+      }
+    );
+    return slackUser.id;
+  } catch (err) {
+    const notInWorkspace =
+      err instanceof SlackError400 && err.code === "users_not_found";
+    if (!notInWorkspace) {
+      console.error(
+        `Slack auto-connect failed for ${u.email}:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+    return null;
+  }
+}
+
+async function resolveSlackIds(
+  byId: Map<string, RecipientLean>
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  for (const [id, u] of byId) {
+    out.set(id, await resolveSlackUserId(u));
+  }
+  return out;
+}
+
+function logSendError(err: unknown): void {
+  console.error(
+    "Slack DM failed:",
+    err instanceof Error ? err.message : err
+  );
+}
 
 function buildAssignText(
   actorName: string,
@@ -57,21 +148,14 @@ export async function notifyProjectAssignmentSlack(
   if (filtered.length === 0) return;
 
   const ids = Array.from(new Set(filtered.map((c) => c.userId)));
-  const users = await User.find({ _id: { $in: ids } })
-    .select("settings.slack")
-    .lean();
-
-  const byId = new Map<string, (typeof users)[number]>(
-    users.map((u) => [String(u._id), u])
-  );
+  const byId = await loadRecipients(ids);
+  const slackIds = await resolveSlackIds(byId);
 
   const sends: Promise<unknown>[] = [];
   for (const change of filtered) {
     const u = byId.get(change.userId);
-    const slack = u?.settings?.slack;
-    if (!slack?.connected) continue;
-    if (!slack?.notifyOnAssign) continue;
-    const slackUserId = slack.slackUserId;
+    if (u?.settings?.slack?.notifyOnAssign === false) continue;
+    const slackUserId = slackIds.get(change.userId);
     if (!slackUserId) continue;
 
     const text = buildAssignText(
@@ -80,7 +164,7 @@ export async function notifyProjectAssignmentSlack(
       ctx.project,
       ctx.projectUrl
     );
-    sends.push(sendSlackDM(slackUserId, text).catch(() => {}));
+    sends.push(sendSlackDM(slackUserId, text).catch(logSendError));
   }
   await Promise.allSettled(sends);
 }
@@ -114,20 +198,14 @@ export async function notifyTaskAssignmentSlack(
   if (filtered.length === 0) return;
 
   const ids = Array.from(new Set(filtered.map((c) => c.userId)));
-  const users = await User.find({ _id: { $in: ids } })
-    .select("settings.slack")
-    .lean();
-  const byId = new Map<string, (typeof users)[number]>(
-    users.map((u) => [String(u._id), u])
-  );
+  const byId = await loadRecipients(ids);
+  const slackIds = await resolveSlackIds(byId);
 
   const sends: Promise<unknown>[] = [];
   for (const change of filtered) {
     const u = byId.get(change.userId);
-    const slack = u?.settings?.slack;
-    if (!slack?.connected) continue;
-    if (!slack?.notifyOnAssign) continue;
-    const slackUserId = slack.slackUserId;
+    if (u?.settings?.slack?.notifyOnAssign === false) continue;
+    const slackUserId = slackIds.get(change.userId);
     if (!slackUserId) continue;
     const text = buildTaskAssignText(
       ctx.actorName,
@@ -136,7 +214,7 @@ export async function notifyTaskAssignmentSlack(
       ctx.task,
       ctx.taskUrl
     );
-    sends.push(sendSlackDM(slackUserId, text).catch(() => {}));
+    sends.push(sendSlackDM(slackUserId, text).catch(logSendError));
   }
   await Promise.allSettled(sends);
 }
@@ -156,23 +234,17 @@ export async function notifyTaskStatusChangeSlack(
   const ids = Array.from(new Set(recipientIds.filter(Boolean)));
   if (ids.length === 0) return;
 
-  const users = await User.find({ _id: { $in: ids } })
-    .select("settings.slack")
-    .lean();
-  const byId = new Map<string, (typeof users)[number]>(
-    users.map((u) => [String(u._id), u])
-  );
+  const byId = await loadRecipients(ids);
+  const slackIds = await resolveSlackIds(byId);
 
   const sends: Promise<unknown>[] = [];
   for (const uid of ids) {
     const u = byId.get(uid);
-    const slack = u?.settings?.slack;
-    if (!slack?.connected) continue;
-    if (!slack?.notifyOnStatusChange) continue;
-    const slackUserId = slack.slackUserId;
+    if (u?.settings?.slack?.notifyOnStatusChange === false) continue;
+    const slackUserId = slackIds.get(uid);
     if (!slackUserId) continue;
     const text = `:arrows_counterclockwise: *${ctx.actorName}* changed status of <${ctx.taskUrl}|${ctx.task.title}> (${ctx.task.taskId}) in ${ctx.project.name} from *${ctx.from}* → *${ctx.to}*.`;
-    sends.push(sendSlackDM(slackUserId, text).catch(() => {}));
+    sends.push(sendSlackDM(slackUserId, text).catch(logSendError));
   }
   await Promise.allSettled(sends);
 }
@@ -191,13 +263,8 @@ export async function notifyMentionSlack(
   const ids = Array.from(new Set(recipientIds.filter(Boolean)));
   if (ids.length === 0) return;
 
-  const users = await User.find({ _id: { $in: ids } })
-    .select("settings.slack")
-    .lean();
-
-  const byId = new Map<string, (typeof users)[number]>(
-    users.map((u) => [String(u._id), u])
-  );
+  const byId = await loadRecipients(ids);
+  const slackIds = await resolveSlackIds(byId);
 
   const where = ctx.task
     ? `task <${ctx.url}|${ctx.task.title}> (${ctx.task.taskId})`
@@ -209,13 +276,11 @@ export async function notifyMentionSlack(
   const sends: Promise<unknown>[] = [];
   for (const uid of ids) {
     const u = byId.get(uid);
-    const slack = u?.settings?.slack;
-    if (!slack?.connected) continue;
-    if (!slack?.notifyOnComment) continue;
-    const slackUserId = slack.slackUserId;
+    if (u?.settings?.slack?.notifyOnComment === false) continue;
+    const slackUserId = slackIds.get(uid);
     if (!slackUserId) continue;
     const text = `:speech_balloon: *${ctx.actorName}* mentioned you in ${where}.${quoted}`;
-    sends.push(sendSlackDM(slackUserId, text).catch(() => {}));
+    sends.push(sendSlackDM(slackUserId, text).catch(logSendError));
   }
   await Promise.allSettled(sends);
 }

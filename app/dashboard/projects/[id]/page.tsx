@@ -346,6 +346,17 @@ export default function ProjectDetailPage() {
   const [taskAssignedDate, setTaskAssignedDate] = useState<Date | null>(null);
   const [taskDueDate, setTaskDueDate] = useState<Date | null>(null);
   const [view, setView] = useState<"list" | "board">("list");
+  // viewReady (state, not a ref) gates the persist effect: on first commit it is
+  // still false in the snapshot, so the write effect skips and cannot clobber the
+  // value the hydration effect just restored (a ref would read true synchronously).
+  const [viewReady, setViewReady] = useState(false);
+  useEffect(() => {
+    if (localStorage.getItem("projectTasksView") === "board") setView("board");
+    setViewReady(true);
+  }, []);
+  useEffect(() => {
+    if (viewReady) localStorage.setItem("projectTasksView", view);
+  }, [view, viewReady]);
   const [taskQuery, setTaskQuery] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState<
     "all" | TaskStatusKey
@@ -4816,9 +4827,18 @@ function SubtaskPanel({
             <AlertDialogHeader>
               <AlertDialogTitle>Remove this subtask?</AlertDialogTitle>
               <AlertDialogDescription>
-                {pendingRemove
-                  ? `"${pendingRemove.title}" will be permanently removed from this task.`
-                  : ""}
+                {pendingRemove ? (
+                  <>
+                    <span className="mb-1 block max-h-24 overflow-y-auto break-all font-medium text-foreground">
+                      &quot;{pendingRemove.title}&quot;
+                    </span>
+                    <span className="block">
+                      will be permanently removed from this task.
+                    </span>
+                  </>
+                ) : (
+                  ""
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
