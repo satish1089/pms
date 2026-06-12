@@ -38,6 +38,7 @@ const subtaskSchema = z.object({
   _id: z.string().optional(),
   title: z.string().min(1, "Subtask title required"),
   completed: z.boolean().default(false),
+  completedbydeveloper: z.string().optional(),
   assignee: z.string().nullable().optional(),
 });
 
@@ -199,6 +200,7 @@ export async function PATCH(
           : {}),
         title: s.title,
         completed: s.completed,
+        completedbydeveloper: s.completedbydeveloper ?? "New",
         assignee:
           s.assignee && isValidId(s.assignee)
             ? new mongoose.Types.ObjectId(s.assignee)

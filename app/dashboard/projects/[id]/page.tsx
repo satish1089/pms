@@ -172,8 +172,46 @@ type Subtask = {
   _id: string;
   title: string;
   completed: boolean;
+  completedbydeveloper?: string;
   assignee?: UserLite | null;
 };
+
+const SUBTASK_DEV_STATUSES = [
+  "New",
+  "Fixed",
+  "Verified/Done",
+  "Closed",
+  "Done",
+  "Not Done/Failed",
+] as const;
+
+const SUBTASK_DEV_STATUS_STYLES: Record<string, { dot: string; cls: string }> =
+  {
+    New: {
+      dot: "bg-sky-500",
+      cls: "bg-sky-500/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400",
+    },
+    Fixed: {
+      dot: "bg-amber-500",
+      cls: "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
+    },
+    "Verified/Done": {
+      dot: "bg-cyan-500",
+      cls: "bg-cyan-500/10 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400",
+    },
+    Closed: {
+      dot: "bg-muted-foreground/60",
+      cls: "bg-muted text-muted-foreground",
+    },
+    Done: {
+      dot: "bg-emerald-500",
+      cls: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+    },
+    "Not Done/Failed": {
+      dot: "bg-rose-500",
+      cls: "bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
+    },
+  };
 
 type TaskPriorityKey = "low" | "medium" | "high" | "urgent";
 
@@ -1430,6 +1468,7 @@ export default function ProjectDetailPage() {
             _id: s._id.startsWith("tmp-") ? undefined : s._id,
             title: s.title,
             completed: s.completed,
+            completedbydeveloper: s.completedbydeveloper ?? "New",
             assignee: s.assignee?._id ?? null,
           })),
           ...(subtaskMention && subtaskMention.mentionIds.length > 0
@@ -3761,6 +3800,7 @@ export default function ProjectDetailPage() {
                       onSave={(next, subtaskMention) =>
                         saveSubtasks(t._id, next, subtaskMention)
                       }
+                      onReload={loadTasks}
                     />
 
                     <div>
@@ -4572,6 +4612,7 @@ function SubtaskPanel({
   canEdit = true,
   canManage = true,
   onSave,
+  onReload,
 }: {
   task: Task;
   mentionUsers?: {
@@ -4588,6 +4629,7 @@ function SubtaskPanel({
     next: Subtask[],
     subtaskMention?: { title: string; mentionIds: string[] },
   ) => void | Promise<void>;
+  onReload?: () => void | Promise<void>;
 }) {
   const subtasks = task.subtasks ?? [];
   const total = subtasks.length;
@@ -4603,6 +4645,17 @@ function SubtaskPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [editMentions, setEditMentions] = useState<Set<string>>(new Set());
+  const [reloading, setReloading] = useState(false);
+
+  async function handleReload() {
+    if (!onReload || reloading) return;
+    setReloading(true);
+    try {
+      await onReload();
+    } finally {
+      setReloading(false);
+    }
+  }
 
   function addSubtask(e: React.FormEvent) {
     e.preventDefault();
@@ -4610,7 +4663,12 @@ function SubtaskPanel({
     if (title.length === 0) return;
     const next: Subtask[] = [
       ...subtasks,
-      { _id: `tmp-${Date.now()}`, title, completed: false },
+      {
+        _id: `tmp-${Date.now()}`,
+        title,
+        completed: false,
+        completedbydeveloper: "New",
+      },
     ];
     const mentionIds = title.includes("@") ? Array.from(draftMentions) : [];
     setDraft("");
@@ -4622,6 +4680,13 @@ function SubtaskPanel({
   function toggle(id: string) {
     const next = subtasks.map((s) =>
       s._id === id ? { ...s, completed: !s.completed } : s,
+    );
+    onSave(next);
+  }
+
+  function changeDevStatus(id: string, status: string) {
+    const next = subtasks.map((s) =>
+      s._id === id ? { ...s, completedbydeveloper: status } : s,
     );
     onSave(next);
   }
@@ -4689,6 +4754,21 @@ function SubtaskPanel({
             />
           </div>
         )}
+        {onReload && (
+          <button
+            type="button"
+            onClick={handleReload}
+            disabled={reloading}
+            title="Reload subtasks"
+            aria-label="Reload subtasks"
+            className="inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/60 bg-background text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw
+              className={cn("size-4.5", reloading && "animate-spin")}
+            />
+          </button>
+        )}
+
         {task.status !== "done" && total > 0 && !allDone && (
           <span className="ml-auto text-[11px] text-muted-foreground">
             Complete all to mark Done
@@ -4801,6 +4881,39 @@ function SubtaskPanel({
                           className="size-7 shrink-0 text-[10px]"
                         />
                       ) : null}
+                      <Select
+                        value={s.completedbydeveloper ?? "New"}
+                        onValueChange={(v) => changeDevStatus(s._id, v)}
+                        disabled={!canEdit}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className={cn(
+                            "h-8 w-36 shrink-0 gap-1.5 font-medium shadow-none",
+                            SUBTASK_DEV_STATUS_STYLES[
+                              s.completedbydeveloper ?? "New"
+                            ]?.cls,
+                          )}
+                          aria-label="Subtask status"
+                        >
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SUBTASK_DEV_STATUSES.map((st) => (
+                            <SelectItem key={st} value={st}>
+                              <span className="flex items-center gap-2">
+                                <span
+                                  className={cn(
+                                    "size-1.5 rounded-full",
+                                    SUBTASK_DEV_STATUS_STYLES[st].dot,
+                                  )}
+                                />
+                                {st}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       {canManage && (
                         <button
                           type="button"

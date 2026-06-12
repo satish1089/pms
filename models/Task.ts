@@ -39,6 +39,7 @@ const SubtaskSchema = new Schema(
   {
     title: { type: String, required: true, trim: true },
     completed: { type: Boolean, default: false },
+    completedbydeveloper: { type: String, default: "New" },
     assignee: {
       type: Schema.Types.ObjectId,
       ref: "User",
