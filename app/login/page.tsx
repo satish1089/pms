@@ -121,7 +121,7 @@ function LoginForm() {
               <RequiredMark />
             </Label>
             <InputGroup
-              className="h-11"
+              className="h-12"
               aria-invalid={errors.email ? true : undefined}
             >
               <InputGroupAddon>
@@ -160,7 +160,7 @@ function LoginForm() {
               </button>
             </div>
             <InputGroup
-              className="h-11"
+              className="h-12"
               aria-invalid={errors.password ? true : undefined}
             >
               <InputGroupAddon>

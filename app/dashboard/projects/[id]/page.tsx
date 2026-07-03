@@ -4529,6 +4529,8 @@ function renderSubtaskTitle(
     "inline-block rounded-sm bg-primary/15 px-1.5 font-mono text-[0.75rem] text-primary no-underline hover:underline whitespace-nowrap";
   const mentionChipCls =
     "inline-block rounded-sm bg-primary/15 px-1.5 text-[0.8125rem] font-medium text-primary whitespace-nowrap";
+  const linkCls =
+    "text-primary underline underline-offset-2 hover:text-primary/80";
 
   const parts: ReactNode[] = [];
   let i = 0;
@@ -4545,6 +4547,27 @@ function renderSubtaskTitle(
     const ch = title[i];
     const prev = i === 0 ? " " : title[i - 1];
     const atBoundary = /\s/.test(prev) || i === 0;
+
+    // Check for URLs
+    const urlMatch = /^https?:\/\/[^\s<>]+/.exec(title.slice(i));
+    if (urlMatch) {
+      flush();
+      const url = urlMatch[0];
+      parts.push(
+        <a
+          key={key++}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={linkCls}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {url}
+        </a>,
+      );
+      i += url.length;
+      continue;
+    }
 
     if (ch === "#" && atBoundary) {
       const rest = title.slice(i + 1);
