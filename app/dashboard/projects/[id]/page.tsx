@@ -188,16 +188,16 @@ const SUBTASK_DEV_STATUSES = [
 const SUBTASK_DEV_STATUS_STYLES: Record<string, { dot: string; cls: string }> =
   {
     New: {
-      dot: "bg-sky-500",
-      cls: "bg-sky-500/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400",
+      dot: "bg-violet-500",
+      cls: "bg-violet-500/10 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400",
     },
     Fixed: {
       dot: "bg-amber-500",
       cls: "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
     },
     "Verified/Done": {
-      dot: "bg-cyan-500",
-      cls: "bg-cyan-500/10 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400",
+      dot: "bg-blue-500",
+      cls: "bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400",
     },
     Closed: {
       dot: "bg-muted-foreground/60",
@@ -4760,7 +4760,7 @@ function SubtaskPanel({
 
   return (
     <div className="border-b border-border/40">
-      <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6">
+      <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5 sm:px-6 sticky top-0 bg-background/95 z-10">
         <ListChecks className="size-4 text-primary" />
         <h3 className="text-sm font-semibold tracking-tight">Subtasks</h3>
         <span className="rounded-full border bg-background px-1.5 py-0 text-[11px] font-medium text-muted-foreground">
@@ -4793,9 +4793,18 @@ function SubtaskPanel({
         )}
 
         {task.status !== "done" && total > 0 && !allDone && (
-          <span className="ml-auto text-[11px] text-muted-foreground">
-            Complete all to mark Done
-          </span>
+          <>
+          {/* <span className="ml-auto text-[11px] text-muted-foreground">
+            Complete all to mark Done 
+          </span> */}
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-1.5 text-xs  text-primary ml-auto"
+          >
+            <Plus className="size-3.5" /> Add subtask
+          </button>
+          </>
         )}
       </div>
       <div className="px-4 py-3 sm:px-6">
