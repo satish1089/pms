@@ -183,6 +183,7 @@ const SUBTASK_DEV_STATUSES = [
   "Closed",
   "Done",
   "Not Done/Failed",
+  "Improvement",
 ] as const;
 
 const SUBTASK_DEV_STATUS_STYLES: Record<string, { dot: string; cls: string }> =
@@ -210,6 +211,10 @@ const SUBTASK_DEV_STATUS_STYLES: Record<string, { dot: string; cls: string }> =
     "Not Done/Failed": {
       dot: "bg-rose-500",
       cls: "bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400",
+    },
+    "Improvement": {
+      dot: "bg-[#4B4038]",
+      cls: "bg-[#4B4038]/10 text-[#4B4038] dark:bg-[#4B4038]/20 dark:text-[#c9a882]",
     },
   };
 
